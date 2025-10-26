@@ -1,0 +1,67 @@
+You're absolutely right. Let me refocus on the core functionality and user experience:
+
+---
+
+## **Project Brief: Daily Template Note-Taking App**
+
+### **What It Does**
+A note-taking app that auto-generates daily notes from a customizable template, extending 7 days into the future, with Google Calendar integration and exceptional list-editing experience.
+
+### **Core Functionality**
+
+#### **1. Daily Note Generation**
+- Automatically create notes for today + next 7 days using the template
+- Each note header: `[Day] MM/DD ([Custom focus text])`
+- Default template structure:
+  ```
+  - Preworkout
+      - Text Mom
+      - Talk to Alyssa
+      - Work
+  - Workout Post Workout
+  - Schedule
+  - Priority To Do
+  - Secondary
+  ```
+
+#### **2. Template Management**
+- User can edit the template (modify sections, bullet points, structure)
+- Template changes apply ONLY to future dates
+- Already-created content in existing notes remains untouched
+- Template is separate from note instances
+
+#### **3. Google Calendar Integration**
+- Pull events from user's Google Calendar
+- Automatically populate the "Schedule" section with that day's events
+- Keep schedule updated with calendar changes
+
+#### **4. List Editing (Critical Priority)**
+**Must feel as good or better than Apple Notes for:**
+- Creating new bullets (Enter key)
+- Creating sub-bullets (Tab to indent)
+- Moving bullets back (Shift+Tab to outdent)
+- Deleting empty bullets (Backspace)
+- Reordering bullets (drag and drop)
+- Typing with zero lag
+- Works smoothly on both desktop and mobile
+
+### **Key Behaviors**
+- Auto-save everything as user types
+- Navigate between days easily
+- Performance: interactions feel instant (no noticeable lag)
+- Mobile-friendly: touch interactions feel natural
+
+### **What Success Looks Like**
+- I can type and manage lists as fast as in Apple Notes
+- My template updates don't destroy existing content
+- Calendar events appear automatically where expected
+- I can plan across multiple days effortlessly
+
+---
+
+**Clarifying Questions:**
+1. Should calendar events be editable once imported?
+2. Check-off functionality for completed items?
+3. Access to past days, or only current + 7 forward?
+4. Dark mode preference?
+5. Need sync across devices?
