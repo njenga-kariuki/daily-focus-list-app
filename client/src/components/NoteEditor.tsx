@@ -1,19 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
-import { ListEditor } from "./ListEditor";
-import { CalendarEventCard } from "./CalendarEventCard";
-import type { DailyNote, ListItem, CalendarEvent } from "@shared/schema";
+import { ListEditor, type ListEditorRef } from "./ListEditor";
+import type { DailyNote, ListItem } from "@shared/schema";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
 interface NoteEditorProps {
   note: DailyNote;
-  events: CalendarEvent[];
   onNoteChange: (updates: Partial<DailyNote>) => void;
 }
 
-export function NoteEditor({ note, events, onNoteChange }: NoteEditorProps) {
+export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
   const [focusText, setFocusText] = useState(note.focusText);
+  const listEditorRef = useRef<ListEditorRef>(null);
 
   useEffect(() => {
     setFocusText(note.focusText);
@@ -29,16 +28,39 @@ export function NoteEditor({ note, events, onNoteChange }: NoteEditorProps) {
     onNoteChange({ content: newContent });
   };
 
-  // Find "Schedule" section in content
-  const scheduleIndex = note.content.findIndex(
-    item => item.text.toLowerCase() === 'schedule'
-  );
+  // Handle clicks in strategic empty space areas only
+  const handleEmptySpaceClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (note.content.length === 0) {
+      // Create first item
+      const newItem: ListItem = {
+        id: `item-${Date.now()}`,
+        text: '',
+        level: 0,
+      };
+      onNoteChange({ content: [newItem] });
+      
+      // Focus it after render
+      requestAnimationFrame(() => {
+        listEditorRef.current?.focusLastItem();
+      });
+    } else {
+      // Focus FIRST item (zone is at top, not bottom)
+      requestAnimationFrame(() => {
+        listEditorRef.current?.focusFirstItem();
+      });
+    }
+  };
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-12 max-w-3xl mx-auto" data-testid="component-note-editor">
-      {/* Header */}
-      <header className="mb-8">
-        <div className="flex items-baseline gap-3 mb-4">
+    <div 
+      className="flex-1 overflow-y-auto px-8 py-3 max-w-3xl mx-auto" 
+      data-testid="component-note-editor"
+    >
+      {/* Header - text is selectable, no item creation */}
+      <header className="mb-2">
+        <div className="flex items-baseline gap-3 mb-2">
           <h1 className="text-header-day text-foreground">
             {note.dayName} {format(new Date(note.date), 'M/d')}
           </h1>
@@ -54,49 +76,23 @@ export function NoteEditor({ note, events, onNoteChange }: NoteEditorProps) {
           className="text-base border-0 border-b rounded-none px-0 focus-visible:ring-0 focus-visible:border-primary transition-colors"
         />
         
-        <Separator className="mt-6 opacity-20" />
+        <Separator className="mt-2 opacity-20" />
       </header>
 
-      {/* Content */}
-      <div className="space-y-12">
-        {note.content.map((section, index) => {
-          const isScheduleSection = section.text.toLowerCase() === 'schedule';
-          
-          return (
-            <section key={section.id} className="space-y-4">
-              {/* Section Header */}
-              <div className="flex items-center gap-4">
-                <h2 className="text-section-header uppercase text-foreground/70 tracking-wider">
-                  {section.text}
-                </h2>
-                <div className="flex-1 h-px bg-border" />
-              </div>
+      {/* Strategic clickable zone between header and content */}
+      <div 
+        className="min-h-[8px] cursor-text hover:bg-accent/5 transition-colors rounded"
+        onClick={handleEmptySpaceClick}
+        title="Click to start typing"
+      />
 
-              {/* Calendar Events for Schedule section */}
-              {isScheduleSection && events.length > 0 && (
-                <div className="space-y-2 mb-6 ml-8">
-                  {events.map(event => (
-                    <CalendarEventCard key={event.id} event={event} />
-                  ))}
-                </div>
-              )}
-
-              {/* Editable Content */}
-              {section.children && section.children.length > 0 && (
-                <div className="ml-8">
-                  <ListEditor
-                    items={section.children}
-                    onChange={(newChildren) => {
-                      const newContent = [...note.content];
-                      newContent[index] = { ...section, children: newChildren };
-                      handleContentChange(newContent);
-                    }}
-                  />
-                </div>
-              )}
-            </section>
-          );
-        })}
+      {/* Content - Single unified list editor */}
+      <div>
+        <ListEditor
+          ref={listEditorRef}
+          items={note.content}
+          onChange={handleContentChange}
+        />
       </div>
     </div>
   );
