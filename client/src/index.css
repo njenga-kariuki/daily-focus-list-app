@@ -164,8 +164,18 @@
 
   [contenteditable][data-placeholder]:empty::before {
     content: attr(data-placeholder);
-    color: hsl(var(--muted-foreground));
+    color: hsl(var(--muted-foreground) / 0.4);
     pointer-events: none;
+  }
+
+  /* Improve contenteditable cursor behavior */
+  [contenteditable] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  [contenteditable]:empty {
+    min-height: 1.5em;
   }
 
   .no-default-hover-elevate {}

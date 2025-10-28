@@ -21,6 +21,18 @@ export function AppSidebar({ selectedDate, onDateSelect, focusTexts }: AppSideba
   const today = new Date();
   const dates = Array.from({ length: 8 }, (_, i) => addDays(today, i));
 
+  const handleDateClick = (date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const element = document.getElementById(`day-${dateStr}`);
+    
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    
+    // Also update the selected date state for highlighting
+    onDateSelect(date);
+  };
+
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
@@ -42,7 +54,7 @@ export function AppSidebar({ selectedDate, onDateSelect, focusTexts }: AppSideba
                 return (
                   <SidebarMenuItem key={dateStr}>
                     <SidebarMenuButton
-                      onClick={() => onDateSelect(date)}
+                      onClick={() => handleDateClick(date)}
                       data-testid={`button-select-day-${dateStr}`}
                       isActive={isSelected}
                       className="flex-col items-start h-auto py-3 px-4"

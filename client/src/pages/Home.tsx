@@ -1,6 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, addDays } from "date-fns";
 import { AppSidebar } from "@/components/AppSidebar";
 import { NoteEditor } from "@/components/NoteEditor";
 import { TemplateEditor } from "@/components/TemplateEditor";
@@ -18,12 +18,23 @@ export default function Home() {
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'offline'>('saved');
   const [saveTimeout, setSaveTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
   const { toast } = useToast();
+  const dayRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const dateStr = format(selectedDate, 'yyyy-MM-dd');
+  const today = new Date();
+  const startDate = today;
+  const endDate = addDays(today, 7); // 8 days total (today + 7)
 
-  // Fetch current note
-  const { data: noteData, isLoading } = useQuery<{ note: DailyNote; events: CalendarEvent[] }>({
-    queryKey: ['/api/notes', dateStr],
+  const startDateStr = format(startDate, 'yyyy-MM-dd');
+  const endDateStr = format(endDate, 'yyyy-MM-dd');
+
+  // Fetch multiple days for continuous scroll
+  const { data: notesData, isLoading } = useQuery<Array<{ note: DailyNote; events: CalendarEvent[] }>>({
+    queryKey: ['/api/notes/range', startDateStr, endDateStr],
+    queryFn: async () => {
+      const response = await fetch(`/api/notes/range?start=${startDateStr}&end=${endDateStr}`);
+      if (!response.ok) throw new Error('Failed to fetch notes');
+      return response.json();
+    },
   });
 
   // Fetch template
@@ -38,11 +49,11 @@ export default function Home() {
 
   // Update note mutation
   const updateNoteMutation = useMutation({
-    mutationFn: async (updates: Partial<DailyNote>) => {
+    mutationFn: async ({ dateStr, updates }: { dateStr: string; updates: Partial<DailyNote> }) => {
       return apiRequest('PATCH', `/api/notes/${dateStr}`, updates);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/notes', dateStr] });
+      queryClient.invalidateQueries({ queryKey: ['/api/notes/range'] });
       queryClient.invalidateQueries({ queryKey: ['/api/notes/focus-texts'] });
       setSaveStatus('saved');
     },
@@ -78,8 +89,8 @@ export default function Home() {
     },
   });
 
-  // Debounced auto-save
-  const handleNoteChange = useCallback((updates: Partial<DailyNote>) => {
+  // Debounced auto-save (now accepts dateStr)
+  const handleNoteChange = useCallback((dateStr: string, updates: Partial<DailyNote>) => {
     setSaveStatus('saving');
     
     if (saveTimeout) {
@@ -87,8 +98,8 @@ export default function Home() {
     }
 
     const timeout = setTimeout(() => {
-      updateNoteMutation.mutate(updates);
-    }, 300);
+      updateNoteMutation.mutate({ dateStr, updates });
+    }, 100);  // Reduced to 100ms for ultra-snappy feel
 
     setSaveTimeout(timeout);
   }, [saveTimeout, updateNoteMutation]);
@@ -100,6 +111,35 @@ export default function Home() {
   const handleTemplateSave = (template: ListItem[]) => {
     updateTemplateMutation.mutate(template);
   };
+
+  // Scroll spy: Update selected date based on which day is in view
+  useEffect(() => {
+    if (!notesData) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+            const dateStr = entry.target.id.replace('day-', '');
+            const date = new Date(dateStr);
+            setSelectedDate(date);
+          }
+        });
+      },
+      {
+        threshold: [0.5],
+        rootMargin: '-100px 0px -50% 0px',
+      }
+    );
+
+    Object.values(dayRefs.current).forEach((ref) => {
+      if (ref) observer.observe(ref);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [notesData]);
 
   if (isLoading) {
     return (
@@ -128,7 +168,7 @@ export default function Home() {
           <div className="flex items-center gap-4">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
             <h2 className="font-semibold text-foreground">
-              {format(selectedDate, 'EEEE, MMMM d, yyyy')}
+              Daily Notes
             </h2>
           </div>
 
@@ -147,14 +187,21 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Note Editor */}
-        {noteData && (
-          <NoteEditor
-            note={noteData.note}
-            events={noteData.events}
-            onNoteChange={handleNoteChange}
-          />
-        )}
+        {/* Continuous Scroll: Multiple Note Editors */}
+        <div className="flex-1 overflow-y-auto">
+          {notesData && notesData.map(({ note }) => (
+            <div
+              key={note.date}
+              id={`day-${note.date}`}
+              ref={(el) => { dayRefs.current[note.date] = el; }}
+            >
+              <NoteEditor
+                note={note}
+                onNoteChange={(updates) => handleNoteChange(note.date, updates)}
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Template Editor (Right Sidebar) */}
