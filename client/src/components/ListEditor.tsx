@@ -103,21 +103,29 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Enter: Create new item (split text if in middle)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      
+
       // Get cursor position and split text
       const selection = window.getSelection();
       let textBeforeCursor = '';
       let textAfterCursor = '';
-      
+
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
-        
+
+        // If text is selected, delete the selection first
+        if (!selection.isCollapsed) {
+          // Delete selected text by replacing with empty string
+          range.deleteContents();
+          // Update the item text
+          updateItem(item.id, { text: target.textContent || '' });
+        }
+
         // Get text before cursor
         const beforeRange = range.cloneRange();
         beforeRange.selectNodeContents(target);
         beforeRange.setEnd(range.startContainer, range.startOffset);
         textBeforeCursor = beforeRange.toString();
-        
+
         // Get text after cursor
         const afterRange = range.cloneRange();
         afterRange.selectNodeContents(target);
@@ -126,17 +134,17 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       } else {
         textBeforeCursor = target.textContent || '';
       }
-      
+
       // Create new item with text after cursor
       const newItem: ListItem = {
         id: `item-${Date.now()}`,
         text: textAfterCursor,
         level: item.level,
       };
-      
+
       // Batched update: update current item and add new item in one go
       updateAndAddAfter(item.id, { text: textBeforeCursor }, newItem);
-      
+
       // Focus new item immediately - single RAF for snappiness
       requestAnimationFrame(() => {
         const newElement = itemRefs.current.get(newItem.id);
@@ -159,7 +167,33 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
       if (item.level < 5) {
+        // Save cursor position before state update
+        const selection = window.getSelection();
+        let cursorOffset = 0;
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          cursorOffset = range.startOffset;
+        }
+
         updateItem(item.id, { level: item.level + 1 });
+
+        // Restore cursor position after re-render
+        requestAnimationFrame(() => {
+          const element = itemRefs.current.get(item.id);
+          if (element) {
+            element.focus();
+            const range = document.createRange();
+            const sel = window.getSelection();
+            if (element.firstChild) {
+              const textNode = element.firstChild;
+              const maxOffset = textNode.textContent?.length || 0;
+              range.setStart(textNode, Math.min(cursorOffset, maxOffset));
+              range.collapse(true);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            }
+          }
+        });
       }
     }
 
@@ -167,17 +201,49 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       if (item.level > 0) {
+        // Save cursor position before state update
+        const selection = window.getSelection();
+        let cursorOffset = 0;
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          cursorOffset = range.startOffset;
+        }
+
         updateItem(item.id, { level: item.level - 1 });
+
+        // Restore cursor position after re-render
+        requestAnimationFrame(() => {
+          const element = itemRefs.current.get(item.id);
+          if (element) {
+            element.focus();
+            const range = document.createRange();
+            const sel = window.getSelection();
+            if (element.firstChild) {
+              const textNode = element.firstChild;
+              const maxOffset = textNode.textContent?.length || 0;
+              range.setStart(textNode, Math.min(cursorOffset, maxOffset));
+              range.collapse(true);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            }
+          }
+        });
       }
     }
 
     // Backspace: Smart deletion (outdent first if indented, then delete)
     if (e.key === 'Backspace') {
       const selection = window.getSelection();
-      const cursorAtStart = selection && selection.rangeCount > 0 && 
+
+      // If there's a text selection, let default behavior handle it
+      if (selection && !selection.isCollapsed) {
+        return; // Allow default deletion of selected text
+      }
+
+      const cursorAtStart = selection && selection.rangeCount > 0 &&
         selection.getRangeAt(0).startOffset === 0 &&
         selection.isCollapsed;
-      
+
       if (cursorAtStart && target.textContent === '') {
         e.preventDefault();
         // If item is indented, outdent first
@@ -186,10 +252,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         } else {
           // If at level 0, delete the item and focus previous
           const previousElement = findPreviousItem(item.id);
-          
+
           // Delete current item
           deleteItem(item.id);
-          
+
           // Focus previous item at the end of its text
           if (previousElement) {
             requestAnimationFrame(() => {
@@ -206,6 +272,58 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
                 sel?.addRange(range);
               }
             });
+          }
+        }
+      }
+    }
+
+    // Delete: Forward deletion (merge with next item when at end)
+    if (e.key === 'Delete') {
+      const selection = window.getSelection();
+
+      // If there's a text selection, let default behavior handle it
+      if (selection && !selection.isCollapsed) {
+        return; // Allow default deletion of selected text
+      }
+
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const textLength = target.textContent?.length || 0;
+        const cursorAtEnd = range.startOffset === textLength &&
+          range.startContainer === target.lastChild;
+
+        // If cursor is at end of current item and text is empty
+        if ((cursorAtEnd || textLength === 0) && target.textContent === '') {
+          e.preventDefault();
+          const nextElement = findNextItem(item.id);
+
+          if (nextElement) {
+            const nextItemId = Array.from(itemRefs.current.entries())
+              .find(([_, el]) => el === nextElement)?.[0];
+
+            if (nextItemId) {
+              // Get the next item's text
+              const nextItemText = nextElement.textContent || '';
+
+              // Delete the next item
+              deleteItem(nextItemId);
+
+              // Update current item with merged text (which is just next item's text since current is empty)
+              updateItem(item.id, { text: nextItemText });
+
+              // Keep focus on current item
+              requestAnimationFrame(() => {
+                target.focus();
+                const range = document.createRange();
+                const sel = window.getSelection();
+                if (target.firstChild) {
+                  range.setStart(target.firstChild, 0);
+                  range.collapse(true);
+                  sel?.removeAllRanges();
+                  sel?.addRange(range);
+                }
+              });
+            }
           }
         }
       }
@@ -244,15 +362,72 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
         const textLength = target.textContent?.length || 0;
-        const cursorAtEnd = range.startOffset === textLength && 
+        const cursorAtEnd = range.startOffset === textLength &&
           range.startContainer === target.lastChild;
-        
+
         if (cursorAtEnd || !target.lastChild) {
           e.preventDefault();
           const nextElement = findNextItem(item.id);
           if (nextElement) {
             nextElement.focus();
             // Place cursor at start
+            const range = document.createRange();
+            const sel = window.getSelection();
+            if (nextElement.firstChild) {
+              range.setStart(nextElement.firstChild, 0);
+              range.collapse(true);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            }
+          }
+        }
+      }
+    }
+
+    // Arrow Left: Navigate to previous item when at start
+    if (e.key === 'ArrowLeft') {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const cursorAtStart = range.startOffset === 0 &&
+          range.startContainer === target.firstChild;
+
+        if ((cursorAtStart || !target.firstChild) && selection.isCollapsed) {
+          e.preventDefault();
+          const previousElement = findPreviousItem(item.id);
+          if (previousElement) {
+            previousElement.focus();
+            // Place cursor at end of previous item
+            const range = document.createRange();
+            const sel = window.getSelection();
+            if (previousElement.lastChild) {
+              const textNode = previousElement.lastChild;
+              const length = textNode.textContent?.length || 0;
+              range.setStart(textNode, length);
+              range.collapse(true);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            }
+          }
+        }
+      }
+    }
+
+    // Arrow Right: Navigate to next item when at end
+    if (e.key === 'ArrowRight') {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const textLength = target.textContent?.length || 0;
+        const cursorAtEnd = range.startOffset === textLength &&
+          range.startContainer === target.lastChild;
+
+        if ((cursorAtEnd || textLength === 0) && selection.isCollapsed) {
+          e.preventDefault();
+          const nextElement = findNextItem(item.id);
+          if (nextElement) {
+            nextElement.focus();
+            // Place cursor at start of next item
             const range = document.createRange();
             const sel = window.getSelection();
             if (nextElement.firstChild) {
@@ -295,30 +470,60 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
   // Handle blur - auto-delete empty items like Apple Notes
   const handleBlur = (item: ListItem) => {
     setFocusedId(null);
-    
+
     // Auto-delete empty items (Apple Notes behavior)
     if (item.text === '' || item.text.trim() === '') {
       // Exception 1: Don't delete if it's the only item in the list
       if (items.length === 1) {
         return;
       }
-      
+
       // Exception 2: Don't delete if item has children (is a header/section)
       if (item.children && item.children.length > 0) {
         return;
       }
-      
+
       // Delete the empty item after a brief delay to allow for navigation
       // This prevents deletion when user is just moving between items
       setTimeout(() => {
         // Re-check that item is still empty (user might have typed in the meantime)
         const allItems = Array.from(itemRefs.current.values());
         const itemElement = itemRefs.current.get(item.id);
-        
+
         if (itemElement && (itemElement.textContent === '' || itemElement.textContent?.trim() === '')) {
           deleteItem(item.id);
         }
       }, 100);
+    }
+  };
+
+  // Handle paste - only allow plain text, no rich formatting
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>, item: ListItem) => {
+    e.preventDefault();
+
+    // Get plain text from clipboard
+    const text = e.clipboardData.getData('text/plain');
+
+    if (text) {
+      // Insert plain text at cursor position
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+
+        const textNode = document.createTextNode(text);
+        range.insertNode(textNode);
+
+        // Move cursor to end of inserted text
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        // Update item state with new text
+        const target = e.target as HTMLDivElement;
+        updateItem(item.id, { text: target.textContent || '' });
+      }
     }
   };
 
@@ -447,6 +652,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
             suppressContentEditableWarning
             onInput={(e) => handleInput(e, item)}
             onKeyDown={(e) => handleKeyDown(e, item)}
+            onPaste={(e) => handlePaste(e, item)}
             onFocus={() => setFocusedId(item.id)}
             onBlur={() => handleBlur(item)}
             data-testid={`input-list-item-${item.id}`}
