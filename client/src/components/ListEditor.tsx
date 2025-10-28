@@ -150,15 +150,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         const newElement = itemRefs.current.get(newItem.id);
         if (newElement) {
           newElement.focus();
-          // Place cursor at start of new item
-          const range = document.createRange();
-          const sel = window.getSelection();
-          if (newElement.firstChild) {
-            range.setStart(newElement.firstChild, 0);
-            range.collapse(true);
-            sel?.removeAllRanges();
-            sel?.addRange(range);
-          }
+          setCursorPosition(newElement, 0, false);
         }
       });
     }
@@ -182,16 +174,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const element = itemRefs.current.get(item.id);
           if (element) {
             element.focus();
-            const range = document.createRange();
-            const sel = window.getSelection();
-            if (element.firstChild) {
-              const textNode = element.firstChild;
-              const maxOffset = textNode.textContent?.length || 0;
-              range.setStart(textNode, Math.min(cursorOffset, maxOffset));
-              range.collapse(true);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
-            }
+            setCursorPosition(element, cursorOffset, false);
           }
         });
       }
@@ -216,16 +199,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const element = itemRefs.current.get(item.id);
           if (element) {
             element.focus();
-            const range = document.createRange();
-            const sel = window.getSelection();
-            if (element.firstChild) {
-              const textNode = element.firstChild;
-              const maxOffset = textNode.textContent?.length || 0;
-              range.setStart(textNode, Math.min(cursorOffset, maxOffset));
-              range.collapse(true);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
-            }
+            setCursorPosition(element, cursorOffset, false);
           }
         });
       }
@@ -260,17 +234,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           if (previousElement) {
             requestAnimationFrame(() => {
               previousElement.focus();
-              // Place cursor at end of previous item
-              const range = document.createRange();
-              const sel = window.getSelection();
-              if (previousElement.lastChild) {
-                const textNode = previousElement.lastChild;
-                const length = textNode.textContent?.length || 0;
-                range.setStart(textNode, length);
-                range.collapse(true);
-                sel?.removeAllRanges();
-                sel?.addRange(range);
-              }
+              setCursorPosition(previousElement, 0, true);
             });
           }
         }
@@ -314,14 +278,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
               // Keep focus on current item
               requestAnimationFrame(() => {
                 target.focus();
-                const range = document.createRange();
-                const sel = window.getSelection();
-                if (target.firstChild) {
-                  range.setStart(target.firstChild, 0);
-                  range.collapse(true);
-                  sel?.removeAllRanges();
-                  sel?.addRange(range);
-                }
+                setCursorPosition(target, 0, false);
               });
             }
           }
@@ -342,15 +299,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const previousElement = findPreviousItem(item.id);
           if (previousElement) {
             previousElement.focus();
-            // Place cursor at end
-            const range = document.createRange();
-            const sel = window.getSelection();
-            if (previousElement.lastChild) {
-              range.setStart(previousElement.lastChild, previousElement.lastChild.textContent?.length || 0);
-              range.collapse(true);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
-            }
+            setCursorPosition(previousElement, 0, true);
           }
         }
       }
@@ -370,15 +319,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const nextElement = findNextItem(item.id);
           if (nextElement) {
             nextElement.focus();
-            // Place cursor at start
-            const range = document.createRange();
-            const sel = window.getSelection();
-            if (nextElement.firstChild) {
-              range.setStart(nextElement.firstChild, 0);
-              range.collapse(true);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
-            }
+            setCursorPosition(nextElement, 0, false);
           }
         }
       }
@@ -397,17 +338,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const previousElement = findPreviousItem(item.id);
           if (previousElement) {
             previousElement.focus();
-            // Place cursor at end of previous item
-            const range = document.createRange();
-            const sel = window.getSelection();
-            if (previousElement.lastChild) {
-              const textNode = previousElement.lastChild;
-              const length = textNode.textContent?.length || 0;
-              range.setStart(textNode, length);
-              range.collapse(true);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
-            }
+            setCursorPosition(previousElement, 0, true);
           }
         }
       }
@@ -427,44 +358,107 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const nextElement = findNextItem(item.id);
           if (nextElement) {
             nextElement.focus();
-            // Place cursor at start of next item
-            const range = document.createRange();
-            const sel = window.getSelection();
-            if (nextElement.firstChild) {
-              range.setStart(nextElement.firstChild, 0);
-              range.collapse(true);
-              sel?.removeAllRanges();
-              sel?.addRange(range);
-            }
+            setCursorPosition(nextElement, 0, false);
           }
         }
       }
     }
   };
 
+  // Helper function to safely set cursor position, handling empty elements
+  const setCursorPosition = (element: HTMLElement, offset: number, atEnd: boolean = false) => {
+    try {
+      const range = document.createRange();
+      const sel = window.getSelection();
+
+      // If element has no text node, create one
+      if (!element.firstChild) {
+        const textNode = document.createTextNode('');
+        element.appendChild(textNode);
+      }
+
+      const textNode = element.firstChild as Text;
+      const maxOffset = textNode.textContent?.length || 0;
+      const finalOffset = atEnd ? maxOffset : Math.min(offset, maxOffset);
+
+      range.setStart(textNode, finalOffset);
+      range.collapse(true);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    } catch (e) {
+      // Fallback: just focus the element
+      element.focus();
+    }
+  };
+
+  // Helper function to flatten items in visual/DOM order (depth-first traversal)
+  const getVisualOrderItems = useCallback((itemsList: ListItem[]): string[] => {
+    const result: string[] = [];
+    const traverse = (items: ListItem[]) => {
+      for (const item of items) {
+        result.push(item.id);
+        if (item.children && item.children.length > 0) {
+          traverse(item.children);
+        }
+      }
+    };
+    traverse(itemsList);
+    return result;
+  }, []);
+
   // Helper function to find previous item in visual order
   const findPreviousItem = (currentId: string): HTMLDivElement | null => {
-    const allItems = Array.from(itemRefs.current.values());
-    const currentElement = itemRefs.current.get(currentId);
-    if (!currentElement) return null;
-    
-    const currentIndex = allItems.indexOf(currentElement);
-    return currentIndex > 0 ? allItems[currentIndex - 1] : null;
+    const visualOrder = getVisualOrderItems(items);
+    const currentIndex = visualOrder.indexOf(currentId);
+
+    if (currentIndex > 0) {
+      const previousId = visualOrder[currentIndex - 1];
+      return itemRefs.current.get(previousId) || null;
+    }
+    return null;
   };
 
   // Helper function to find next item in visual order
   const findNextItem = (currentId: string): HTMLDivElement | null => {
-    const allItems = Array.from(itemRefs.current.values());
-    const currentElement = itemRefs.current.get(currentId);
-    if (!currentElement) return null;
-    
-    const currentIndex = allItems.indexOf(currentElement);
-    return currentIndex < allItems.length - 1 ? allItems[currentIndex + 1] : null;
+    const visualOrder = getVisualOrderItems(items);
+    const currentIndex = visualOrder.indexOf(currentId);
+
+    if (currentIndex >= 0 && currentIndex < visualOrder.length - 1) {
+      const nextId = visualOrder[currentIndex + 1];
+      return itemRefs.current.get(nextId) || null;
+    }
+    return null;
   };
 
   const handleInput = (e: FormEvent<HTMLDivElement>, item: ListItem) => {
     const target = e.target as HTMLDivElement;
-    updateItem(item.id, { text: target.textContent || '' });
+    const newText = target.textContent || '';
+
+    // Save cursor position before state update
+    const selection = window.getSelection();
+    let cursorOffset = 0;
+    let isAtEnd = false;
+
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      // Calculate offset from start of text
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(target);
+      preCaretRange.setEnd(range.endContainer, range.endOffset);
+      cursorOffset = preCaretRange.toString().length;
+      isAtEnd = cursorOffset === newText.length;
+    }
+
+    updateItem(item.id, { text: newText });
+
+    // Restore cursor position after React re-renders
+    requestAnimationFrame(() => {
+      const element = itemRefs.current.get(item.id);
+      if (element && element === document.activeElement) {
+        // Only restore if this element is still focused
+        setCursorPosition(element, cursorOffset, isAtEnd);
+      }
+    });
   };
 
   // Handle blur - auto-delete empty items like Apple Notes
@@ -530,38 +524,24 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
   // Expose methods to parent components
   useImperativeHandle(ref, () => ({
     focusLastItem: () => {
-      const allItems = Array.from(itemRefs.current.values());
-      const lastItem = allItems[allItems.length - 1];
-      if (lastItem) {
-        lastItem.focus();
-        // Place cursor at end
-        const range = document.createRange();
-        const sel = window.getSelection();
-        if (lastItem.lastChild) {
-          const textNode = lastItem.lastChild;
-          const length = textNode.textContent?.length || 0;
-          range.setStart(textNode, length);
-          range.collapse(true);
-          sel?.removeAllRanges();
-          sel?.addRange(range);
+      const visualOrder = getVisualOrderItems(items);
+      if (visualOrder.length > 0) {
+        const lastId = visualOrder[visualOrder.length - 1];
+        const lastItem = itemRefs.current.get(lastId);
+        if (lastItem) {
+          lastItem.focus();
+          setCursorPosition(lastItem, 0, true);
         }
       }
     },
     focusFirstItem: () => {
-      const allItems = Array.from(itemRefs.current.values());
-      const firstItem = allItems[0];
-      if (firstItem) {
-        firstItem.focus();
-        // Place cursor at end of first item
-        const range = document.createRange();
-        const sel = window.getSelection();
-        if (firstItem.lastChild) {
-          const textNode = firstItem.lastChild;
-          const length = textNode.textContent?.length || 0;
-          range.setStart(textNode, length);
-          range.collapse(true);
-          sel?.removeAllRanges();
-          sel?.addRange(range);
+      const visualOrder = getVisualOrderItems(items);
+      if (visualOrder.length > 0) {
+        const firstId = visualOrder[0];
+        const firstItem = itemRefs.current.get(firstId);
+        if (firstItem) {
+          firstItem.focus();
+          setCursorPosition(firstItem, 0, true);
         }
       }
     },
@@ -571,16 +551,19 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         text: '',
         level: 0,
       };
-      
+
       onChange([...items, newItem]);
-      
+
       // Focus the new item
       requestAnimationFrame(() => {
         const newElement = itemRefs.current.get(newItem.id);
-        newElement?.focus();
+        if (newElement) {
+          newElement.focus();
+          setCursorPosition(newElement, 0, false);
+        }
       });
     }
-  }), [items, onChange]);
+  }), [items, onChange, getVisualOrderItems]);
 
   // Handle clicks on empty space to create new items
   const handleContainerClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
@@ -613,11 +596,14 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     };
     
     onChange([...items, newItem]);
-    
+
     // Focus the new item
     requestAnimationFrame(() => {
       const newElement = itemRefs.current.get(newItem.id);
-      newElement?.focus();
+      if (newElement) {
+        newElement.focus();
+        setCursorPosition(newElement, 0, false);
+      }
     });
   }, [items, onChange]);
 
@@ -701,7 +687,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
             onChange([newItem]);
             requestAnimationFrame(() => {
               const newElement = itemRefs.current.get(newItem.id);
-              newElement?.focus();
+              if (newElement) {
+                newElement.focus();
+                setCursorPosition(newElement, 0, false);
+              }
             });
           }}
           className="text-muted-foreground/60 cursor-text p-2 text-list-item"
