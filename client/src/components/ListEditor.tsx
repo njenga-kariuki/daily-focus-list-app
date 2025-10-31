@@ -35,30 +35,78 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
   const deleteItem = (id: string) => {
     const deleteRecursive = (items: ListItem[]): ListItem[] => {
-      return items.filter(item => {
-        if (item.id === id) return false;
-        if (item.children) {
-          item.children = deleteRecursive(item.children);
+      let changed = false;
+      const nextItems: ListItem[] = [];
+
+      for (const item of items) {
+        if (item.id === id) {
+          changed = true;
+          continue;
         }
-        return true;
-      });
+
+        let nextChildren = item.children;
+        if (item.children) {
+          const updatedChildren = deleteRecursive(item.children);
+          if (updatedChildren !== item.children) {
+            nextChildren = updatedChildren;
+            changed = true;
+          }
+        }
+
+        if (nextChildren !== item.children) {
+          nextItems.push({
+            ...item,
+            children: nextChildren,
+          });
+        } else {
+          nextItems.push(item);
+        }
+      }
+
+      if (!changed && nextItems.length === items.length) {
+        return items;
+      }
+
+      return nextItems;
     };
     onChange(deleteRecursive(items));
   };
 
   const addItemAfter = (id: string, newItem: ListItem) => {
     const addRecursive = (items: ListItem[]): ListItem[] => {
-      const result: ListItem[] = [];
+      let changed = false;
+      const nextItems: ListItem[] = [];
+
       for (const item of items) {
-        result.push(item);
-        if (item.id === id) {
-          result.push(newItem);
-        }
+        let nextChildren = item.children;
         if (item.children) {
-          item.children = addRecursive(item.children);
+          const updatedChildren = addRecursive(item.children);
+          if (updatedChildren !== item.children) {
+            nextChildren = updatedChildren;
+            changed = true;
+          }
+        }
+
+        if (nextChildren !== item.children) {
+          nextItems.push({
+            ...item,
+            children: nextChildren,
+          });
+        } else {
+          nextItems.push(item);
+        }
+
+        if (item.id === id) {
+          nextItems.push(newItem);
+          changed = true;
         }
       }
-      return result;
+
+      if (!changed) {
+        return items;
+      }
+
+      return nextItems;
     };
     onChange(addRecursive(items));
   };
@@ -66,27 +114,46 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
   // Optimized batched update: update item text and add new item in single state change
   const updateAndAddAfter = (id: string, updates: Partial<ListItem>, newItem: ListItem) => {
     const processRecursive = (items: ListItem[]): ListItem[] => {
-      const result: ListItem[] = [];
+      let changed = false;
+      const nextItems: ListItem[] = [];
+
       for (const item of items) {
-        // If this is the item to update
         if (item.id === id) {
-          // Push the updated item, preserving children
-          const updatedItem = { ...item, ...updates };
-          if (item.children) {
-            updatedItem.children = item.children;
+          const updatedItem: ListItem = {
+            ...item,
+            ...updates,
+            ...(item.children ? { children: item.children } : {}),
+          };
+          nextItems.push(updatedItem);
+          nextItems.push(newItem);
+          changed = true;
+          continue;
+        }
+
+        let nextChildren = item.children;
+        if (item.children) {
+          const updatedChildren = processRecursive(item.children);
+          if (updatedChildren !== item.children) {
+            nextChildren = updatedChildren;
+            changed = true;
           }
-          result.push(updatedItem);
-          result.push(newItem);
+        }
+
+        if (nextChildren !== item.children) {
+          nextItems.push({
+            ...item,
+            children: nextChildren,
+          });
         } else {
-          // Otherwise, push the item and recurse into children
-          const processedItem = { ...item };
-          if (item.children) {
-            processedItem.children = processRecursive(item.children);
-          }
-          result.push(processedItem);
+          nextItems.push(item);
         }
       }
-      return result;
+
+      if (!changed) {
+        return items;
+      }
+
+      return nextItems;
     };
     onChange(processRecursive(items));
   };
