@@ -25,6 +25,32 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     }));
   };
 
+  // Helper to wait for an element to be available in the DOM
+  const waitForElement = (itemId: string, maxAttempts: number = 20): Promise<HTMLDivElement | null> => {
+    return new Promise((resolve) => {
+      let attempts = 0;
+
+      const checkElement = () => {
+        const element = itemRefs.current.get(itemId);
+
+        if (element) {
+          resolve(element);
+          return;
+        }
+
+        attempts++;
+        if (attempts >= maxAttempts) {
+          resolve(null);
+          return;
+        }
+
+        requestAnimationFrame(checkElement);
+      };
+
+      checkElement();
+    });
+  };
+
   const findItemPath = (itemsList: ListItem[], targetId: string, currentPath: number[] = []): number[] | null => {
     for (let index = 0; index < itemsList.length; index++) {
       const item = itemsList[index];
@@ -294,15 +320,12 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
     addItemAfter(id, duplicatedItem);
 
-    // Focus the duplicated item
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newElement = itemRefs.current.get(duplicatedItem.id);
-        if (newElement) {
-          newElement.focus();
-          setCursorPosition(newElement, 0, true); // Place cursor at end
-        }
-      });
+    // Focus the duplicated item after it's available in the DOM
+    waitForElement(duplicatedItem.id).then((newElement) => {
+      if (newElement) {
+        newElement.focus();
+        setCursorPosition(newElement, 0, true); // Place cursor at end
+      }
     });
   };
 
@@ -475,15 +498,12 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       // Batched update: update current item and add new item in one go
       updateAndAddAfter(item.id, { text: textBeforeCursor }, newItem);
 
-      // Focus new item after React re-renders - double RAF ensures DOM is updated
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const newElement = itemRefs.current.get(newItem.id);
-          if (newElement) {
-            newElement.focus();
-            setCursorPosition(newElement, 0, false);
-          }
-        });
+      // Focus new item after it's available in the DOM
+      waitForElement(newItem.id).then((newElement) => {
+        if (newElement) {
+          newElement.focus();
+          setCursorPosition(newElement, 0, false);
+        }
       });
     }
 
@@ -619,14 +639,11 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
       // Focus the next item after deletion
       if (nextFocusId) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const nextElement = itemRefs.current.get(nextFocusId);
-            if (nextElement) {
-              nextElement.focus();
-              setCursorPosition(nextElement, 0, false);
-            }
-          });
+        waitForElement(nextFocusId).then((nextElement) => {
+          if (nextElement) {
+            nextElement.focus();
+            setCursorPosition(nextElement, 0, false);
+          }
         });
       }
     }
@@ -1093,15 +1110,12 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
       onChange([...items, newItem]);
 
-      // Focus the new item after React re-renders - double RAF ensures DOM is updated
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const newElement = itemRefs.current.get(newItem.id);
-          if (newElement) {
-            newElement.focus();
-            setCursorPosition(newElement, 0, false);
-          }
-        });
+      // Focus the new item after it's available in the DOM
+      waitForElement(newItem.id).then((newElement) => {
+        if (newElement) {
+          newElement.focus();
+          setCursorPosition(newElement, 0, false);
+        }
       });
     }
   }), [items, onChange, getVisualOrderItems]);
@@ -1138,15 +1152,12 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     
     onChange([...items, newItem]);
 
-    // Focus the new item after React re-renders - double RAF ensures DOM is updated
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newElement = itemRefs.current.get(newItem.id);
-        if (newElement) {
-          newElement.focus();
-          setCursorPosition(newElement, 0, false);
-        }
-      });
+    // Focus the new item after it's available in the DOM
+    waitForElement(newItem.id).then((newElement) => {
+      if (newElement) {
+        newElement.focus();
+        setCursorPosition(newElement, 0, false);
+      }
     });
   }, [items, onChange]);
 
@@ -1228,15 +1239,12 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
               level: 0,
             };
             onChange([newItem]);
-            // Focus the new item after React re-renders - double RAF ensures DOM is updated
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                const newElement = itemRefs.current.get(newItem.id);
-                if (newElement) {
-                  newElement.focus();
-                  setCursorPosition(newElement, 0, false);
-                }
-              });
+            // Focus the new item after it's available in the DOM
+            waitForElement(newItem.id).then((newElement) => {
+              if (newElement) {
+                newElement.focus();
+                setCursorPosition(newElement, 0, false);
+              }
             });
           }}
           className="text-muted-foreground/60 cursor-text p-2 text-list-item"
