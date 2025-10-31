@@ -91,6 +91,121 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     onChange(processRecursive(items));
   };
 
+  type SavedCaretPosition = {
+    containerPath: number[];
+    offset: number;
+    textOffset: number;
+    isAtEnd: boolean;
+  };
+
+  const getNodePath = (root: Node, target: Node): number[] => {
+    const path: number[] = [];
+    let current: Node | null = target;
+
+    while (current && current !== root) {
+      const parent = current.parentNode;
+      if (!parent) break;
+      const index = Array.prototype.indexOf.call(parent.childNodes, current);
+      path.unshift(index);
+      current = parent;
+    }
+
+    return path;
+  };
+
+  const getNodeByPath = (root: Node, path: number[]): Node | null => {
+    let current: Node | null = root;
+
+    for (const index of path) {
+      if (!current || !current.childNodes || index < 0 || index >= current.childNodes.length) {
+        return null;
+      }
+      current = current.childNodes[index] ?? null;
+    }
+
+    return current;
+  };
+
+  const getContainerSize = (node: Node): number => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent?.length ?? 0;
+    }
+    return node.childNodes.length;
+  };
+
+  const ensureTextNode = (element: HTMLElement): Text => {
+    let textNode = Array.from(element.childNodes).find(child => child.nodeType === Node.TEXT_NODE) as Text | undefined;
+    if (textNode) {
+      return textNode;
+    }
+
+    textNode = document.createTextNode("");
+    element.appendChild(textNode);
+    return textNode;
+  };
+
+  const findTextPosition = (element: HTMLElement, textOffset: number, placeAtEnd: boolean): { node: Node; offset: number } => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+    let currentNode = walker.nextNode() as Text | null;
+    let accumulated = 0;
+    let lastTextNode: Text | null = null;
+
+    while (currentNode) {
+      const length = currentNode.textContent?.length ?? 0;
+      if (!placeAtEnd && accumulated + length >= textOffset) {
+        const offsetInNode = Math.min(textOffset - accumulated, length);
+        return { node: currentNode, offset: offsetInNode };
+      }
+
+      accumulated += length;
+      lastTextNode = currentNode;
+      currentNode = walker.nextNode() as Text | null;
+    }
+
+    if (placeAtEnd && lastTextNode) {
+      return { node: lastTextNode, offset: lastTextNode.textContent?.length ?? 0 };
+    }
+
+    if (lastTextNode) {
+      const offsetInLast = Math.min(textOffset, lastTextNode.textContent?.length ?? 0);
+      return { node: lastTextNode, offset: offsetInLast };
+    }
+
+    const fallbackNode = ensureTextNode(element);
+    const fallbackOffset = placeAtEnd
+      ? fallbackNode.textContent?.length ?? 0
+      : Math.min(textOffset, fallbackNode.textContent?.length ?? 0);
+    return { node: fallbackNode, offset: fallbackOffset };
+  };
+
+  const captureCaretPosition = (element: HTMLElement): SavedCaretPosition | null => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!element.contains(range.startContainer)) {
+      return null;
+    }
+
+    const containerPath = getNodePath(element, range.startContainer);
+
+    const preCaretRange = range.cloneRange();
+    preCaretRange.selectNodeContents(element);
+    preCaretRange.setEnd(range.startContainer, range.startOffset);
+    const textOffset = preCaretRange.toString().length;
+
+    const isAtEnd = textOffset >= (element.textContent?.length ?? 0);
+
+    return {
+      containerPath,
+      offset: range.startOffset,
+      textOffset,
+      isAtEnd,
+    };
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>, item: ListItem) => {
     const target = e.target as HTMLDivElement;
     
@@ -160,12 +275,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       e.preventDefault();
       if (item.level < 5) {
         // Save cursor position before state update
-        const selection = window.getSelection();
-        let cursorOffset = 0;
-        if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          cursorOffset = range.startOffset;
-        }
+        const savedCaret = captureCaretPosition(target);
 
         updateItem(item.id, { level: item.level + 1 });
 
@@ -174,7 +284,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const element = itemRefs.current.get(item.id);
           if (element) {
             element.focus();
-            setCursorPosition(element, cursorOffset, false);
+            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
           }
         });
       }
@@ -185,12 +295,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       e.preventDefault();
       if (item.level > 0) {
         // Save cursor position before state update
-        const selection = window.getSelection();
-        let cursorOffset = 0;
-        if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          cursorOffset = range.startOffset;
-        }
+        const savedCaret = captureCaretPosition(target);
 
         updateItem(item.id, { level: item.level - 1 });
 
@@ -199,7 +304,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const element = itemRefs.current.get(item.id);
           if (element) {
             element.focus();
-            setCursorPosition(element, cursorOffset, false);
+            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
           }
         });
       }
@@ -365,26 +470,36 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     }
   };
 
-  // Helper function to safely set cursor position, handling empty elements
-  const setCursorPosition = (element: HTMLElement, offset: number, atEnd: boolean = false) => {
+  // Helper function to safely set cursor position, handling nested elements and node paths
+  const setCursorPosition = (
+    element: HTMLElement,
+    position: number | SavedCaretPosition = 0,
+    atEnd: boolean = false,
+  ) => {
     try {
       const range = document.createRange();
-      const sel = window.getSelection();
+      const selection = window.getSelection();
 
-      // If element has no text node, create one
-      if (!element.firstChild) {
-        const textNode = document.createTextNode('');
-        element.appendChild(textNode);
+      if (typeof position !== 'number') {
+        const preferEnd = position.isAtEnd || atEnd;
+        const container = getNodeByPath(element, position.containerPath);
+
+        if (container && element.contains(container)) {
+          const maxOffset = getContainerSize(container);
+          const finalOffset = preferEnd ? maxOffset : Math.min(position.offset, maxOffset);
+          range.setStart(container, finalOffset);
+        } else {
+          const fallback = findTextPosition(element, position.textOffset, preferEnd);
+          range.setStart(fallback.node, fallback.offset);
+        }
+      } else {
+        const fallback = findTextPosition(element, position, atEnd);
+        range.setStart(fallback.node, fallback.offset);
       }
 
-      const textNode = element.firstChild as Text;
-      const maxOffset = textNode.textContent?.length || 0;
-      const finalOffset = atEnd ? maxOffset : Math.min(offset, maxOffset);
-
-      range.setStart(textNode, finalOffset);
       range.collapse(true);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
     } catch (e) {
       // Fallback: just focus the element
       element.focus();
@@ -435,19 +550,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     const newText = target.textContent || '';
 
     // Save cursor position before state update
-    const selection = window.getSelection();
-    let cursorOffset = 0;
-    let isAtEnd = false;
-
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      // Calculate offset from start of text
-      const preCaretRange = range.cloneRange();
-      preCaretRange.selectNodeContents(target);
-      preCaretRange.setEnd(range.endContainer, range.endOffset);
-      cursorOffset = preCaretRange.toString().length;
-      isAtEnd = cursorOffset === newText.length;
-    }
+    const savedCaret = captureCaretPosition(target);
 
     updateItem(item.id, { text: newText });
 
@@ -456,7 +559,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       const element = itemRefs.current.get(item.id);
       if (element && element === document.activeElement) {
         // Only restore if this element is still focused
-        setCursorPosition(element, cursorOffset, isAtEnd);
+        setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
       }
     });
   };
