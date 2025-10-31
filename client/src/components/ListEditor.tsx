@@ -18,6 +18,63 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const cloneItems = (itemsList: ListItem[]): ListItem[] => {
+    return itemsList.map(currentItem => ({
+      ...currentItem,
+      children: currentItem.children ? cloneItems(currentItem.children) : undefined,
+    }));
+  };
+
+  const findItemPath = (itemsList: ListItem[], targetId: string, currentPath: number[] = []): number[] | null => {
+    for (let index = 0; index < itemsList.length; index++) {
+      const item = itemsList[index];
+      const newPath = [...currentPath, index];
+
+      if (item.id === targetId) {
+        return newPath;
+      }
+
+      if (item.children && item.children.length > 0) {
+        const childPath = findItemPath(item.children, targetId, newPath);
+        if (childPath) {
+          return childPath;
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const getItemAndParentByPath = (itemsList: ListItem[], path: number[]): {
+    item: ListItem | null;
+    parentArray: ListItem[] | null;
+    index: number;
+  } => {
+    let parentArray: ListItem[] | null = itemsList;
+    let currentItem: ListItem | null = null;
+
+    for (let depth = 0; depth < path.length; depth++) {
+      if (!parentArray) {
+        return { item: null, parentArray: null, index: -1 };
+      }
+
+      const index = path[depth];
+      currentItem = parentArray[index] ?? null;
+
+      if (!currentItem) {
+        return { item: null, parentArray: null, index: -1 };
+      }
+
+      if (depth === path.length - 1) {
+        return { item: currentItem, parentArray, index };
+      }
+
+      parentArray = currentItem.children ?? null;
+    }
+
+    return { item: null, parentArray: null, index: -1 };
+  };
+
   const updateItem = (id: string, updates: Partial<ListItem>) => {
     const updateRecursive = (items: ListItem[]): ListItem[] => {
       return items.map(item => {
@@ -386,11 +443,20 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         return; // Allow default deletion of selected text
       }
 
-      const cursorAtStart = selection && selection.rangeCount > 0 &&
-        selection.getRangeAt(0).startOffset === 0 &&
-        selection.isCollapsed;
+      if (!selection || selection.rangeCount === 0) {
+        return;
+      }
 
-      if (cursorAtStart && target.textContent === '') {
+      const range = selection.getRangeAt(0);
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(target);
+      preCaretRange.setEnd(range.startContainer, range.startOffset);
+
+      const cursorOffset = preCaretRange.toString().length;
+      const textContent = target.textContent || '';
+      const cursorAtStart = selection.isCollapsed && cursorOffset === 0;
+
+      if (cursorAtStart && textContent === '') {
         e.preventDefault();
         // If item is indented, outdent first
         if (item.level > 0) {
@@ -410,6 +476,68 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
             });
           }
         }
+      } else if (cursorAtStart) {
+        e.preventDefault();
+        const previousElement = findPreviousItem(item.id);
+
+        if (!previousElement) {
+          return;
+        }
+
+        const previousEntry = Array.from(itemRefs.current.entries())
+          .find(([_, el]) => el === previousElement);
+
+        const previousId = previousEntry?.[0];
+        if (!previousId) {
+          return;
+        }
+
+        const previousPath = findItemPath(items, previousId);
+        const currentPath = findItemPath(items, item.id);
+
+        if (!previousPath || !currentPath) {
+          return;
+        }
+
+        const itemsCopy = cloneItems(items);
+        const { item: previousItemClone } = getItemAndParentByPath(itemsCopy, previousPath);
+        const {
+          item: currentItemClone,
+          parentArray: currentParentArray,
+          index: currentIndex,
+        } = getItemAndParentByPath(itemsCopy, currentPath);
+
+        if (!previousItemClone || !currentItemClone || !currentParentArray) {
+          return;
+        }
+
+        const previousTextLength = previousItemClone.text.length;
+        const currentItemText = currentItemClone.text;
+        const currentItemChildren = currentItemClone.children;
+
+        // Remove the current item from its parent array
+        currentParentArray.splice(currentIndex, 1);
+
+        // Merge text
+        previousItemClone.text = `${previousItemClone.text}${currentItemText}`;
+
+        // Move children over to the previous item
+        if (currentItemChildren && currentItemChildren.length > 0) {
+          if (!previousItemClone.children) {
+            previousItemClone.children = [];
+          }
+          previousItemClone.children.push(...currentItemChildren);
+        }
+
+        onChange(itemsCopy);
+
+        requestAnimationFrame(() => {
+          const previousDomElement = itemRefs.current.get(previousId);
+          if (previousDomElement) {
+            previousDomElement.focus();
+            setCursorPosition(previousDomElement, previousTextLength, false);
+          }
+        });
       }
     }
 
@@ -422,39 +550,83 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         return; // Allow default deletion of selected text
       }
 
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        const textLength = target.textContent?.length || 0;
-        const cursorAtEnd = range.startOffset === textLength &&
-          range.startContainer === target.lastChild;
+      if (!selection || selection.rangeCount === 0) {
+        return;
+      }
 
-        // If cursor is at end of current item and text is empty
-        if ((cursorAtEnd || textLength === 0) && target.textContent === '') {
-          e.preventDefault();
-          const nextElement = findNextItem(item.id);
+      const range = selection.getRangeAt(0);
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(target);
+      preCaretRange.setEnd(range.startContainer, range.startOffset);
 
-          if (nextElement) {
-            const nextItemId = Array.from(itemRefs.current.entries())
-              .find(([_, el]) => el === nextElement)?.[0];
+      const cursorOffset = preCaretRange.toString().length;
+      const textContent = target.textContent || '';
+      const textLength = textContent.length;
+      const cursorAtEnd = selection.isCollapsed && cursorOffset === textLength;
 
-            if (nextItemId) {
-              // Get the next item's text
-              const nextItemText = nextElement.textContent || '';
+      if (cursorAtEnd) {
+        e.preventDefault();
+        const nextElement = findNextItem(item.id);
 
-              // Delete the next item
-              deleteItem(nextItemId);
-
-              // Update current item with merged text (which is just next item's text since current is empty)
-              updateItem(item.id, { text: nextItemText });
-
-              // Keep focus on current item
-              requestAnimationFrame(() => {
-                target.focus();
-                setCursorPosition(target, 0, false);
-              });
-            }
-          }
+        if (!nextElement) {
+          return;
         }
+
+        const nextItemEntry = Array.from(itemRefs.current.entries())
+          .find(([_, el]) => el === nextElement);
+
+        const nextItemId = nextItemEntry?.[0];
+
+        if (!nextItemId) {
+          return;
+        }
+
+        const currentPath = findItemPath(items, item.id);
+        const nextPath = findItemPath(items, nextItemId);
+
+        if (!currentPath || !nextPath) {
+          return;
+        }
+
+        const itemsCopy = cloneItems(items);
+        const { item: currentItemClone } = getItemAndParentByPath(itemsCopy, currentPath);
+        const {
+          item: nextItemClone,
+          parentArray: nextParentArray,
+          index: nextIndex,
+        } = getItemAndParentByPath(itemsCopy, nextPath);
+
+        if (!currentItemClone || !nextItemClone || !nextParentArray) {
+          return;
+        }
+
+        const currentTextLength = currentItemClone.text.length;
+        const nextItemText = nextItemClone.text;
+        const nextItemChildren = nextItemClone.children;
+
+        // Remove the next item from its parent array
+        nextParentArray.splice(nextIndex, 1);
+
+        // Merge text
+        currentItemClone.text = `${currentItemClone.text}${nextItemText}`;
+
+        // Append children from the next item
+        if (nextItemChildren && nextItemChildren.length > 0) {
+          if (!currentItemClone.children) {
+            currentItemClone.children = [];
+          }
+          currentItemClone.children.push(...nextItemChildren);
+        }
+
+        onChange(itemsCopy);
+
+        requestAnimationFrame(() => {
+          const currentDomElement = itemRefs.current.get(item.id);
+          if (currentDomElement) {
+            currentDomElement.focus();
+            setCursorPosition(currentDomElement, currentTextLength, false);
+          }
+        });
       }
     }
 
