@@ -13,6 +13,128 @@ export interface ListEditorRef {
   createAndFocusNewItem: () => void;
 }
 
+interface SerializedPosition {
+  path: number[];
+  offset: number;
+}
+
+interface SerializedSelection {
+  anchor: SerializedPosition;
+  focus: SerializedPosition;
+}
+
+const getNodePath = (node: Node | null, root: Node): number[] | null => {
+  if (!node) return null;
+
+  const path: number[] = [];
+  let current: Node | null = node;
+
+  while (current && current !== root) {
+    const parentNode = current.parentNode as (Node & ParentNode) | null;
+    if (!parentNode) return null;
+    const siblings = Array.from(parentNode.childNodes);
+    const index = siblings.indexOf(current as ChildNode);
+    if (index === -1) return null;
+    path.unshift(index);
+    current = parentNode;
+  }
+
+  return current === root ? path : null;
+};
+
+const getNodeFromPath = (root: Node, path: number[]): Node | null => {
+  let current: Node | null = root;
+
+  for (const index of path) {
+    if (!current || !current.childNodes || index >= current.childNodes.length) {
+      return null;
+    }
+    current = current.childNodes[index];
+  }
+
+  return current;
+};
+
+const clampOffsetForNode = (node: Node, offset: number): number => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const textLength = node.textContent?.length ?? 0;
+    return Math.min(offset, textLength);
+  }
+
+  const length = node.childNodes.length;
+  return Math.min(offset, length);
+};
+
+const serializeSelection = (root: HTMLElement): SerializedSelection | null => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return null;
+  }
+
+  const anchorNode = selection.anchorNode;
+  const focusNode = selection.focusNode;
+
+  if (!anchorNode || !focusNode) {
+    return null;
+  }
+
+  if (!(root === anchorNode || root.contains(anchorNode))) {
+    return null;
+  }
+
+  if (!(root === focusNode || root.contains(focusNode))) {
+    return null;
+  }
+
+  const anchorPath = getNodePath(anchorNode, root);
+  const focusPath = getNodePath(focusNode, root);
+
+  if (!anchorPath || !focusPath) {
+    return null;
+  }
+
+  return {
+    anchor: {
+      path: anchorPath,
+      offset: selection.anchorOffset,
+    },
+    focus: {
+      path: focusPath,
+      offset: selection.focusOffset,
+    },
+  };
+};
+
+const restoreSelection = (root: HTMLElement, serialized: SerializedSelection): boolean => {
+  const selection = window.getSelection();
+  if (!selection) {
+    return false;
+  }
+
+  const anchorNode = getNodeFromPath(root, serialized.anchor.path);
+  const focusNode = getNodeFromPath(root, serialized.focus.path);
+
+  if (!anchorNode || !focusNode) {
+    return false;
+  }
+
+  const anchorOffset = clampOffsetForNode(anchorNode, serialized.anchor.offset);
+  const focusOffset = clampOffsetForNode(focusNode, serialized.focus.offset);
+
+  if (typeof selection.setBaseAndExtent === "function") {
+    selection.removeAllRanges();
+    selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+  } else {
+    const range = document.createRange();
+    range.setStart(anchorNode, anchorOffset);
+    range.setEnd(focusNode, focusOffset);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  return true;
+};
+
 export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, onChange, className = "" }, ref) => {
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -159,13 +281,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
       if (item.level < 5) {
-        // Save cursor position before state update
-        const selection = window.getSelection();
-        let cursorOffset = 0;
-        if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          cursorOffset = range.startOffset;
-        }
+        const savedSelection = serializeSelection(target);
 
         updateItem(item.id, { level: item.level + 1 });
 
@@ -174,7 +290,9 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const element = itemRefs.current.get(item.id);
           if (element) {
             element.focus();
-            setCursorPosition(element, cursorOffset, false);
+            if (!savedSelection || !restoreSelection(element, savedSelection)) {
+              setCursorPosition(element, 0, true);
+            }
           }
         });
       }
@@ -184,13 +302,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       if (item.level > 0) {
-        // Save cursor position before state update
-        const selection = window.getSelection();
-        let cursorOffset = 0;
-        if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          cursorOffset = range.startOffset;
-        }
+        const savedSelection = serializeSelection(target);
 
         updateItem(item.id, { level: item.level - 1 });
 
@@ -199,7 +311,9 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           const element = itemRefs.current.get(item.id);
           if (element) {
             element.focus();
-            setCursorPosition(element, cursorOffset, false);
+            if (!savedSelection || !restoreSelection(element, savedSelection)) {
+              setCursorPosition(element, 0, true);
+            }
           }
         });
       }
@@ -434,20 +548,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     const target = e.target as HTMLDivElement;
     const newText = target.textContent || '';
 
-    // Save cursor position before state update
-    const selection = window.getSelection();
-    let cursorOffset = 0;
-    let isAtEnd = false;
-
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      // Calculate offset from start of text
-      const preCaretRange = range.cloneRange();
-      preCaretRange.selectNodeContents(target);
-      preCaretRange.setEnd(range.endContainer, range.endOffset);
-      cursorOffset = preCaretRange.toString().length;
-      isAtEnd = cursorOffset === newText.length;
-    }
+    const savedSelection = serializeSelection(target);
 
     updateItem(item.id, { text: newText });
 
@@ -456,7 +557,9 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       const element = itemRefs.current.get(item.id);
       if (element && element === document.activeElement) {
         // Only restore if this element is still focused
-        setCursorPosition(element, cursorOffset, isAtEnd);
+        if (!savedSelection || !restoreSelection(element, savedSelection)) {
+          setCursorPosition(element, 0, true);
+        }
       }
     });
   };
