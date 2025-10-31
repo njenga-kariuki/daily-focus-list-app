@@ -4,6 +4,7 @@ import { ListEditor, type ListEditorRef } from "./ListEditor";
 import type { DailyNote, ListItem } from "@shared/schema";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { useHistory } from "@/hooks/useHistory";
 
 interface NoteEditorProps {
   note: DailyNote;
@@ -14,9 +15,32 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
   const [focusText, setFocusText] = useState(note.focusText);
   const listEditorRef = useRef<ListEditorRef>(null);
 
+  // Track content history for undo/redo
+  const {
+    state: contentHistory,
+    set: setContentHistory,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    reset: resetHistory
+  } = useHistory<ListItem[]>(note.content);
+
   useEffect(() => {
     setFocusText(note.focusText);
   }, [note.focusText]);
+
+  // Reset history when note changes (e.g., switching dates)
+  useEffect(() => {
+    resetHistory(note.content);
+  }, [note.id, resetHistory]);
+
+  // Sync content history changes to parent
+  useEffect(() => {
+    if (JSON.stringify(contentHistory) !== JSON.stringify(note.content)) {
+      onNoteChange({ content: contentHistory });
+    }
+  }, [contentHistory]);
 
   const handleFocusTextBlur = () => {
     if (focusText !== note.focusText) {
@@ -25,8 +49,38 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
   };
 
   const handleContentChange = (newContent: ListItem[]) => {
-    onNoteChange({ content: newContent });
+    setContentHistory(newContent);
   };
+
+  // Handle keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd+Z (Mac) or Ctrl+Z (Windows/Linux) for undo
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        if (canUndo) {
+          e.preventDefault();
+          undo();
+        }
+      }
+      // Cmd+Shift+Z (Mac) or Ctrl+Shift+Z (Windows/Linux) for redo
+      else if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+        if (canRedo) {
+          e.preventDefault();
+          redo();
+        }
+      }
+      // Cmd+Y (alternative redo shortcut on Windows)
+      else if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
+        if (canRedo) {
+          e.preventDefault();
+          redo();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canUndo, canRedo, undo, redo]);
 
   // Handle clicks in strategic empty space areas only
   const handleEmptySpaceClick = (e: React.MouseEvent) => {
