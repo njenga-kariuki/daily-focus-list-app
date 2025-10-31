@@ -18,77 +18,236 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const updateItem = (id: string, updates: Partial<ListItem>) => {
-    const updateRecursive = (items: ListItem[]): ListItem[] => {
-      return items.map(item => {
-        if (item.id === id) {
-          return { ...item, ...updates };
+  const cloneItems = (itemsToClone: ListItem[]): ListItem[] => {
+    return itemsToClone.map(item => ({
+      ...item,
+      children: item.children ? cloneItems(item.children) : undefined,
+    }));
+  };
+
+  interface ItemLocation {
+    parent: ListItem | null;
+    array: ListItem[];
+    index: number;
+  }
+
+  const findItemLocation = (
+    list: ListItem[],
+    id: string,
+    parent: ListItem | null = null,
+  ): ItemLocation | null => {
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      if (item.id === id) {
+        return { parent, array: list, index: i };
+      }
+      if (item.children) {
+        const result = findItemLocation(item.children, id, item);
+        if (result) {
+          return result;
         }
-        if (item.children) {
-          return { ...item, children: updateRecursive(item.children) };
-        }
-        return item;
-      });
+      }
+    }
+    return null;
+  };
+
+  const adjustSubtreeLevels = (item: ListItem, delta: number) => {
+    const applyDelta = (node: ListItem) => {
+      node.level = Math.min(5, Math.max(0, node.level + delta));
+      if (node.children) {
+        node.children.forEach((child: ListItem) => applyDelta(child));
+      }
     };
-    onChange(updateRecursive(items));
+    applyDelta(item);
+  };
+
+  const cleanupEmptyChildren = (node: ListItem) => {
+    if (node.children) {
+      node.children.forEach((child: ListItem) => cleanupEmptyChildren(child));
+      if (node.children.length === 0) {
+        node.children = undefined;
+      }
+    }
+  };
+
+  const getSubtreeLevelBounds = (node: ListItem): { min: number; max: number } => {
+    let min = node.level;
+    let max = node.level;
+    if (node.children) {
+      for (const child of node.children) {
+        const childBounds = getSubtreeLevelBounds(child);
+        min = Math.min(min, childBounds.min);
+        max = Math.max(max, childBounds.max);
+      }
+    }
+    return { min, max };
+  };
+
+  const indentItem = (id: string) => {
+    const cloned = cloneItems(items);
+    const location = findItemLocation(cloned, id);
+    if (!location) return;
+
+    const { array, index } = location;
+    if (index === 0) return; // No previous sibling to indent under
+
+    const previousSibling = array[index - 1];
+    const targetLevel = Math.min(previousSibling.level + 1, 5);
+    if (targetLevel <= previousSibling.level) return;
+
+    const itemToMove = array[index];
+    const bounds = getSubtreeLevelBounds(itemToMove);
+    const levelDelta = targetLevel - itemToMove.level;
+    if (bounds.max + levelDelta > 5 || bounds.min + levelDelta < 0) return;
+
+    array.splice(index, 1);
+
+    if (levelDelta !== 0) {
+      adjustSubtreeLevels(itemToMove, levelDelta);
+    }
+
+    if (!previousSibling.children) {
+      previousSibling.children = [];
+    }
+    previousSibling.children.push(itemToMove);
+
+    if (location.parent) {
+      cleanupEmptyChildren(location.parent);
+    }
+
+    onChange(cloned);
+  };
+
+  const outdentItem = (id: string) => {
+    const cloned = cloneItems(items);
+    const location = findItemLocation(cloned, id);
+    if (!location || !location.parent) return;
+
+    const { array, index, parent } = location;
+    const parentLocation = findItemLocation(cloned, parent.id);
+    if (!parentLocation) return;
+
+    const itemToMove = array[index];
+    const levelDelta = parent.level - itemToMove.level;
+    const bounds = getSubtreeLevelBounds(itemToMove);
+    if (bounds.max + levelDelta > 5 || bounds.min + levelDelta < 0) return;
+
+    array.splice(index, 1);
+
+    const insertionArray = parentLocation.array;
+    const parentIndex = parentLocation.index;
+
+    insertionArray.splice(parentIndex + 1, 0, itemToMove);
+
+    if (levelDelta !== 0) {
+      adjustSubtreeLevels(itemToMove, levelDelta);
+    }
+
+    cleanupEmptyChildren(parent);
+
+    onChange(cloned);
+  };
+
+  const updateItem = (id: string, updates: Partial<ListItem>) => {
+    const cloned = cloneItems(items);
+
+    const applyUpdate = (list: ListItem[]): boolean => {
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        if (item.id === id) {
+          const updated: ListItem = {
+            ...item,
+            ...updates,
+            children: item.children ? cloneItems(item.children) : undefined,
+          };
+          list[i] = updated;
+          return true;
+        }
+        if (item.children && applyUpdate(item.children)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    applyUpdate(cloned);
+    onChange(cloned);
   };
 
   const deleteItem = (id: string) => {
-    const deleteRecursive = (items: ListItem[]): ListItem[] => {
-      return items.filter(item => {
-        if (item.id === id) return false;
-        if (item.children) {
-          item.children = deleteRecursive(item.children);
-        }
-        return true;
-      });
+    const cloned = cloneItems(items);
+
+    const removeRecursive = (list: ListItem[]): ListItem[] => {
+      return list
+        .filter(item => item.id !== id)
+        .map(item => {
+          if (item.children) {
+            const updatedChildren = removeRecursive(item.children);
+            return {
+              ...item,
+              children: updatedChildren.length > 0 ? updatedChildren : undefined,
+            };
+          }
+          return item;
+        });
     };
-    onChange(deleteRecursive(items));
+
+    onChange(removeRecursive(cloned));
   };
 
   const addItemAfter = (id: string, newItem: ListItem) => {
-    const addRecursive = (items: ListItem[]): ListItem[] => {
-      const result: ListItem[] = [];
-      for (const item of items) {
-        result.push(item);
+    const cloned = cloneItems(items);
+
+    const insertAfter = (list: ListItem[]): boolean => {
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
         if (item.id === id) {
-          result.push(newItem);
+          list.splice(i + 1, 0, newItem);
+          return true;
         }
-        if (item.children) {
-          item.children = addRecursive(item.children);
+        if (item.children && insertAfter(item.children)) {
+          return true;
         }
       }
-      return result;
+      return false;
     };
-    onChange(addRecursive(items));
+
+    if (!insertAfter(cloned)) {
+      cloned.push(newItem);
+    }
+
+    onChange(cloned);
   };
 
   // Optimized batched update: update item text and add new item in single state change
   const updateAndAddAfter = (id: string, updates: Partial<ListItem>, newItem: ListItem) => {
-    const processRecursive = (items: ListItem[]): ListItem[] => {
-      const result: ListItem[] = [];
-      for (const item of items) {
-        // If this is the item to update
+    const cloned = cloneItems(items);
+
+    const processRecursive = (list: ListItem[]): boolean => {
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
         if (item.id === id) {
-          // Push the updated item, preserving children
-          const updatedItem = { ...item, ...updates };
-          if (item.children) {
-            updatedItem.children = item.children;
-          }
-          result.push(updatedItem);
-          result.push(newItem);
-        } else {
-          // Otherwise, push the item and recurse into children
-          const processedItem = { ...item };
-          if (item.children) {
-            processedItem.children = processRecursive(item.children);
-          }
-          result.push(processedItem);
+          const updatedItem: ListItem = {
+            ...item,
+            ...updates,
+            children: item.children ? cloneItems(item.children) : undefined,
+          };
+          list[i] = updatedItem;
+          list.splice(i + 1, 0, newItem);
+          return true;
+        }
+        if (item.children && processRecursive(item.children)) {
+          return true;
         }
       }
-      return result;
+      return false;
     };
-    onChange(processRecursive(items));
+
+    if (!processRecursive(cloned)) {
+      cloned.push(newItem);
+    }
+
+    onChange(cloned);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>, item: ListItem) => {
@@ -158,51 +317,49 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Tab: Indent (increase level)
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
-      if (item.level < 5) {
-        // Save cursor position before state update
-        const selection = window.getSelection();
-        let cursorOffset = 0;
-        if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          cursorOffset = range.startOffset;
-        }
 
-        updateItem(item.id, { level: item.level + 1 });
-
-        // Restore cursor position after re-render
-        requestAnimationFrame(() => {
-          const element = itemRefs.current.get(item.id);
-          if (element) {
-            element.focus();
-            setCursorPosition(element, cursorOffset, false);
-          }
-        });
+      // Save cursor position before state update
+      const selection = window.getSelection();
+      let cursorOffset = 0;
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        cursorOffset = range.startOffset;
       }
+
+      indentItem(item.id);
+
+      // Restore cursor position after re-render
+      requestAnimationFrame(() => {
+        const element = itemRefs.current.get(item.id);
+        if (element) {
+          element.focus();
+          setCursorPosition(element, cursorOffset, false);
+        }
+      });
     }
 
     // Shift+Tab: Outdent (decrease level)
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
-      if (item.level > 0) {
-        // Save cursor position before state update
-        const selection = window.getSelection();
-        let cursorOffset = 0;
-        if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          cursorOffset = range.startOffset;
-        }
 
-        updateItem(item.id, { level: item.level - 1 });
-
-        // Restore cursor position after re-render
-        requestAnimationFrame(() => {
-          const element = itemRefs.current.get(item.id);
-          if (element) {
-            element.focus();
-            setCursorPosition(element, cursorOffset, false);
-          }
-        });
+      // Save cursor position before state update
+      const selection = window.getSelection();
+      let cursorOffset = 0;
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        cursorOffset = range.startOffset;
       }
+
+      outdentItem(item.id);
+
+      // Restore cursor position after re-render
+      requestAnimationFrame(() => {
+        const element = itemRefs.current.get(item.id);
+        if (element) {
+          element.focus();
+          setCursorPosition(element, cursorOffset, false);
+        }
+      });
     }
 
     // Backspace: Smart deletion (outdent first if indented, then delete)
@@ -222,7 +379,15 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         e.preventDefault();
         // If item is indented, outdent first
         if (item.level > 0) {
-          updateItem(item.id, { level: item.level - 1 });
+          outdentItem(item.id);
+
+          requestAnimationFrame(() => {
+            const element = itemRefs.current.get(item.id);
+            if (element) {
+              element.focus();
+              setCursorPosition(element, 0, false);
+            }
+          });
         } else {
           // If at level 0, delete the item and focus previous
           const previousElement = findPreviousItem(item.id);
@@ -657,7 +822,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         {/* Nested children */}
         {item.children && item.children.length > 0 && (
           <div className="mt-1 mb-2 ml-6">
-            {item.children.map((child, idx) => renderItem(child, idx))}
+            {item.children.map((child: ListItem, idx: number) => renderItem(child, idx))}
           </div>
         )}
       </div>

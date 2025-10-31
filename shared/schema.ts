@@ -1,17 +1,21 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, jsonb, timestamp, boolean } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
+import { pgTable, text, varchar, jsonb, timestamp } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 // List Item structure for nested bullet lists
-export const listItemSchema = z.object({
+export type ListItem = {
+  id: string;
+  text: string;
+  level: number;
+  children?: ListItem[];
+};
+
+export const listItemSchema: z.ZodType<ListItem> = z.object({
   id: z.string(),
   text: z.string(),
   level: z.number().min(0).max(5),
   children: z.array(z.lazy(() => listItemSchema)).optional(),
 });
-
-export type ListItem = z.infer<typeof listItemSchema>;
 
 // Template structure
 export const templates = pgTable("templates", {
@@ -20,9 +24,8 @@ export const templates = pgTable("templates", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const insertTemplateSchema = createInsertSchema(templates).omit({
-  id: true,
-  updatedAt: true,
+export const insertTemplateSchema = z.object({
+  content: z.array(listItemSchema),
 });
 
 export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
@@ -39,10 +42,11 @@ export const dailyNotes = pgTable("daily_notes", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const insertDailyNoteSchema = createInsertSchema(dailyNotes).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
+export const insertDailyNoteSchema = z.object({
+  date: z.string(),
+  dayName: z.string(),
+  focusText: z.string().default(""),
+  content: z.array(listItemSchema),
 });
 
 export type InsertDailyNote = z.infer<typeof insertDailyNoteSchema>;
