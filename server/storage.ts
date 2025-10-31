@@ -84,14 +84,15 @@ export class MemStorage implements IStorage {
   }
 
   private cloneTemplate(content: ListItem[]): ListItem[] {
-    return JSON.parse(JSON.stringify(content)).map((item: ListItem) => ({
-      ...item,
-      id: `note-${randomUUID()}`,
-      children: item.children?.map(child => ({
-        ...child,
+    const cloneItems = (items: ListItem[]): ListItem[] => {
+      return items.map((item) => ({
+        ...item,
         id: `note-${randomUUID()}`,
-      })),
-    }));
+        children: item.children ? cloneItems(item.children) : undefined,
+      }));
+    };
+
+    return cloneItems(content);
   }
 
   async getTemplate(): Promise<Template | undefined> {
@@ -101,7 +102,7 @@ export class MemStorage implements IStorage {
   async updateTemplate(templateData: InsertTemplate): Promise<Template> {
     const template: Template = {
       id: this.template?.id || randomUUID(),
-      content: templateData.content,
+      content: templateData.content as ListItem[],
       updatedAt: new Date(),
     };
     this.template = template;
@@ -113,13 +114,13 @@ export class MemStorage implements IStorage {
     const tomorrowStr = format(tomorrow, 'yyyy-MM-dd');
     
     // Update all notes in storage that are for future dates (tomorrow or later)
-    for (const [dateStr, note] of this.dailyNotes.entries()) {
+    this.dailyNotes.forEach((note, dateStr) => {
       // Only update if the note's date is >= tomorrow
       if (dateStr >= tomorrowStr) {
         note.content = this.cloneTemplate(template.content);
         note.updatedAt = new Date();
       }
-    }
+    });
 
     // Also ensure we have notes for the next 7 days
     for (let i = 1; i < 8; i++) {
@@ -151,6 +152,8 @@ export class MemStorage implements IStorage {
     const note: DailyNote = {
       id: randomUUID(),
       ...noteData,
+      focusText: noteData.focusText ?? '',
+      content: noteData.content as ListItem[],
       createdAt: new Date(),
       updatedAt: new Date(),
     };
