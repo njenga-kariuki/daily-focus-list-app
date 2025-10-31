@@ -215,6 +215,97 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     onChange(processRecursive(items));
   };
 
+  // Move item up in the list
+  const moveItemUp = (id: string) => {
+    const path = findItemPath(items, id);
+    if (!path || path.length === 0) return;
+
+    const parentPath = path.slice(0, -1);
+    const index = path[path.length - 1];
+
+    if (index === 0) return; // Already at the top
+
+    const processRecursive = (items: ListItem[], currentPath: number[]): ListItem[] => {
+      if (currentPath.length === 0) {
+        const newItems = [...items];
+        [newItems[index - 1], newItems[index]] = [newItems[index], newItems[index - 1]];
+        return newItems;
+      }
+
+      return items.map((item, idx) => {
+        if (idx === currentPath[0]) {
+          return {
+            ...item,
+            children: item.children ? processRecursive(item.children, currentPath.slice(1)) : undefined,
+          };
+        }
+        return item;
+      });
+    };
+
+    onChange(processRecursive(items, parentPath));
+  };
+
+  // Move item down in the list
+  const moveItemDown = (id: string) => {
+    const path = findItemPath(items, id);
+    if (!path || path.length === 0) return;
+
+    const parentPath = path.slice(0, -1);
+    const index = path[path.length - 1];
+
+    const { parentArray } = getItemAndParentByPath(items, path);
+    if (!parentArray || index >= parentArray.length - 1) return; // Already at the bottom
+
+    const processRecursive = (items: ListItem[], currentPath: number[]): ListItem[] => {
+      if (currentPath.length === 0) {
+        const newItems = [...items];
+        [newItems[index], newItems[index + 1]] = [newItems[index + 1], newItems[index]];
+        return newItems;
+      }
+
+      return items.map((item, idx) => {
+        if (idx === currentPath[0]) {
+          return {
+            ...item,
+            children: item.children ? processRecursive(item.children, currentPath.slice(1)) : undefined,
+          };
+        }
+        return item;
+      });
+    };
+
+    onChange(processRecursive(items, parentPath));
+  };
+
+  // Duplicate the current item
+  const duplicateItem = (id: string) => {
+    const path = findItemPath(items, id);
+    if (!path) return;
+
+    const { item } = getItemAndParentByPath(items, path);
+    if (!item) return;
+
+    const duplicatedItem: ListItem = {
+      ...item,
+      id: `item-${Date.now()}`,
+      children: item.children ? cloneItems(item.children) : undefined,
+    };
+
+    addItemAfter(id, duplicatedItem);
+
+    // Focus the duplicated item
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const newElement = itemRefs.current.get(duplicatedItem.id);
+        if (newElement) {
+          newElement.focus();
+          setCursorPosition(newElement, 0, true); // Place cursor at end
+        }
+      });
+    });
+  };
+
   type SavedCaretPosition = {
     containerPath: number[];
     offset: number;
@@ -384,13 +475,15 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       // Batched update: update current item and add new item in one go
       updateAndAddAfter(item.id, { text: textBeforeCursor }, newItem);
 
-      // Focus new item immediately - single RAF for snappiness
+      // Focus new item after React re-renders - double RAF ensures DOM is updated
       requestAnimationFrame(() => {
-        const newElement = itemRefs.current.get(newItem.id);
-        if (newElement) {
-          newElement.focus();
-          setCursorPosition(newElement, 0, false);
-        }
+        requestAnimationFrame(() => {
+          const newElement = itemRefs.current.get(newItem.id);
+          if (newElement) {
+            newElement.focus();
+            setCursorPosition(newElement, 0, false);
+          }
+        });
       });
     }
 
@@ -430,6 +523,110 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
             element.focus();
             setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
           }
+        });
+      }
+    }
+
+    // Cmd+] or Ctrl+]: Alternative indent shortcut
+    if ((e.metaKey || e.ctrlKey) && e.key === ']') {
+      e.preventDefault();
+      if (item.level < 5) {
+        const savedCaret = captureCaretPosition(target);
+        updateItem(item.id, { level: item.level + 1 });
+        requestAnimationFrame(() => {
+          const element = itemRefs.current.get(item.id);
+          if (element) {
+            element.focus();
+            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
+          }
+        });
+      }
+    }
+
+    // Cmd+[ or Ctrl+[: Alternative outdent shortcut
+    if ((e.metaKey || e.ctrlKey) && e.key === '[') {
+      e.preventDefault();
+      if (item.level > 0) {
+        const savedCaret = captureCaretPosition(target);
+        updateItem(item.id, { level: item.level - 1 });
+        requestAnimationFrame(() => {
+          const element = itemRefs.current.get(item.id);
+          if (element) {
+            element.focus();
+            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
+          }
+        });
+      }
+    }
+
+    // Cmd+Shift+Up or Ctrl+Shift+Up: Move item up
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'ArrowUp') {
+      e.preventDefault();
+      const savedCaret = captureCaretPosition(target);
+      moveItemUp(item.id);
+      requestAnimationFrame(() => {
+        const element = itemRefs.current.get(item.id);
+        if (element) {
+          element.focus();
+          setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
+        }
+      });
+    }
+
+    // Cmd+Shift+Down or Ctrl+Shift+Down: Move item down
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'ArrowDown') {
+      e.preventDefault();
+      const savedCaret = captureCaretPosition(target);
+      moveItemDown(item.id);
+      requestAnimationFrame(() => {
+        const element = itemRefs.current.get(item.id);
+        if (element) {
+          element.focus();
+          setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
+        }
+      });
+    }
+
+    // Cmd+D or Ctrl+D: Duplicate item
+    if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
+      e.preventDefault();
+      duplicateItem(item.id);
+    }
+
+    // Escape: Blur/unfocus current item
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      target.blur();
+      return;
+    }
+
+    // Cmd+Shift+Backspace or Ctrl+Shift+Backspace: Delete entire item
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'Backspace') {
+      e.preventDefault();
+
+      // Find the next or previous item to focus after deletion
+      const visualOrder = getVisualOrderItems(items);
+      const currentIndex = visualOrder.indexOf(item.id);
+      let nextFocusId: string | null = null;
+
+      if (currentIndex < visualOrder.length - 1) {
+        nextFocusId = visualOrder[currentIndex + 1];
+      } else if (currentIndex > 0) {
+        nextFocusId = visualOrder[currentIndex - 1];
+      }
+
+      deleteItem(item.id);
+
+      // Focus the next item after deletion
+      if (nextFocusId) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const nextElement = itemRefs.current.get(nextFocusId);
+            if (nextElement) {
+              nextElement.focus();
+              setCursorPosition(nextElement, 0, false);
+            }
+          });
         });
       }
     }
@@ -896,13 +1093,15 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
       onChange([...items, newItem]);
 
-      // Focus the new item
+      // Focus the new item after React re-renders - double RAF ensures DOM is updated
       requestAnimationFrame(() => {
-        const newElement = itemRefs.current.get(newItem.id);
-        if (newElement) {
-          newElement.focus();
-          setCursorPosition(newElement, 0, false);
-        }
+        requestAnimationFrame(() => {
+          const newElement = itemRefs.current.get(newItem.id);
+          if (newElement) {
+            newElement.focus();
+            setCursorPosition(newElement, 0, false);
+          }
+        });
       });
     }
   }), [items, onChange, getVisualOrderItems]);
@@ -939,13 +1138,15 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     
     onChange([...items, newItem]);
 
-    // Focus the new item
+    // Focus the new item after React re-renders - double RAF ensures DOM is updated
     requestAnimationFrame(() => {
-      const newElement = itemRefs.current.get(newItem.id);
-      if (newElement) {
-        newElement.focus();
-        setCursorPosition(newElement, 0, false);
-      }
+      requestAnimationFrame(() => {
+        const newElement = itemRefs.current.get(newItem.id);
+        if (newElement) {
+          newElement.focus();
+          setCursorPosition(newElement, 0, false);
+        }
+      });
     });
   }, [items, onChange]);
 
@@ -1027,12 +1228,15 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
               level: 0,
             };
             onChange([newItem]);
+            // Focus the new item after React re-renders - double RAF ensures DOM is updated
             requestAnimationFrame(() => {
-              const newElement = itemRefs.current.get(newItem.id);
-              if (newElement) {
-                newElement.focus();
-                setCursorPosition(newElement, 0, false);
-              }
+              requestAnimationFrame(() => {
+                const newElement = itemRefs.current.get(newItem.id);
+                if (newElement) {
+                  newElement.focus();
+                  setCursorPosition(newElement, 0, false);
+                }
+              });
             });
           }}
           className="text-muted-foreground/60 cursor-text p-2 text-list-item"
