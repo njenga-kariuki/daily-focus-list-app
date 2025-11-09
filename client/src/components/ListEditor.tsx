@@ -431,22 +431,60 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
   // Helper to check if cursor is on the first visual line
   const isOnFirstLine = (element: HTMLDivElement): boolean => {
+    // Simple approach: if there are no <br> tags, we're always on first line
+    // If there are <br> tags, check if cursor is before the first one
     const sel = window.getSelection();
-    if (!sel?.rangeCount) return false;
+    if (!sel?.rangeCount) return true;
+
+    const textContent = element.textContent || '';
+    const brTags = element.querySelectorAll('br');
+
+    // No line breaks = single line = always on first line
+    if (brTags.length === 0) {
+      console.log('[isOnFirstLine] Single line item - always true');
+      return true;
+    }
+
+    // Multi-line item: check cursor position relative to first <br>
     const range = sel.getRangeAt(0);
-    const rangeRect = range.getBoundingClientRect();
-    const elementRect = element.getBoundingClientRect();
-    return (rangeRect.top - elementRect.top) < 5;
+    const preCaretRange = range.cloneRange();
+    preCaretRange.selectNodeContents(element);
+    preCaretRange.setEnd(range.startContainer, range.startOffset);
+    const textBeforeCursor = preCaretRange.toString();
+
+    // If there's a newline before cursor, we're NOT on first line
+    const result = !textBeforeCursor.includes('\n');
+    console.log('[isOnFirstLine]', { brCount: brTags.length, textBeforeCursor, result });
+    return result;
   };
 
   // Helper to check if cursor is on the last visual line
   const isOnLastLine = (element: HTMLDivElement): boolean => {
+    // Simple approach: if there are no <br> tags, we're always on last line
+    // If there are <br> tags, check if cursor is after the last one
     const sel = window.getSelection();
-    if (!sel?.rangeCount) return false;
+    if (!sel?.rangeCount) return true;
+
+    const textContent = element.textContent || '';
+    const brTags = element.querySelectorAll('br');
+
+    // No line breaks = single line = always on last line
+    if (brTags.length === 0) {
+      console.log('[isOnLastLine] Single line item - always true');
+      return true;
+    }
+
+    // Multi-line item: check if there's any text after cursor that contains newline
     const range = sel.getRangeAt(0);
-    const rangeRect = range.getBoundingClientRect();
-    const elementRect = element.getBoundingClientRect();
-    return (elementRect.bottom - rangeRect.bottom) < 5;
+    const afterCaretRange = range.cloneRange();
+    afterCaretRange.selectNodeContents(element);
+    afterCaretRange.setStart(range.endContainer, range.endOffset);
+    const textAfterCursor = afterCaretRange.toString();
+
+    // If there's a newline after cursor, we're NOT on last line
+    const result = !textAfterCursor.includes('\n');
+    console.log('[isOnLastLine]', { brCount: brTags.length, textAfterCursor, result });
+    return result;
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>, item: ListItem) => {
@@ -857,42 +895,64 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       }
     }
 
-    // Arrow Up: Navigate to previous item when on first visual line
-    if (e.key === 'ArrowUp') {
-      if (isOnFirstLine(target)) {
-        e.preventDefault();
-        const previousElement = findPreviousItem(item.id);
-        if (previousElement) {
-          const textNode = ensureTextNode(previousElement);
-          previousElement.focus();
+    // Arrow Up: Navigate to previous item when cursor can't move up further
+    if (e.key === 'ArrowUp' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const cursorPosition = range.startOffset;
 
-          // Position cursor at end
-          const range = document.createRange();
-          const sel = window.getSelection();
-          range.setStart(textNode, textNode.length);
-          range.collapse(true);
-          sel?.removeAllRanges();
-          sel?.addRange(range);
+        // Save the current cursor position
+        const beforeRange = range.cloneRange();
+        beforeRange.selectNodeContents(target);
+        beforeRange.setEnd(range.startContainer, range.startOffset);
+        const textOffsetBefore = beforeRange.toString().length;
+
+        // Check if we're on the first line by testing if default behavior would change cursor position vertically
+        // For single-line items or when on first line, we should navigate
+        const shouldNavigate = isOnFirstLine(target);
+
+        if (shouldNavigate) {
+          e.preventDefault();
+          const previousElement = findPreviousItem(item.id);
+          if (previousElement) {
+            const textNode = ensureTextNode(previousElement);
+            previousElement.focus();
+
+            // Position cursor at end
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, textNode.length);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
         }
       }
     }
 
-    // Arrow Down: Navigate to next item when on last visual line
-    if (e.key === 'ArrowDown') {
-      if (isOnLastLine(target)) {
-        e.preventDefault();
-        const nextElement = findNextItem(item.id);
-        if (nextElement) {
-          const textNode = ensureTextNode(nextElement);
-          nextElement.focus();
+    // Arrow Down: Navigate to next item when cursor can't move down further
+    if (e.key === 'ArrowDown' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        // Check if we're on the last line
+        const shouldNavigate = isOnLastLine(target);
 
-          // Position cursor at start
-          const range = document.createRange();
-          const sel = window.getSelection();
-          range.setStart(textNode, 0);
-          range.collapse(true);
-          sel?.removeAllRanges();
-          sel?.addRange(range);
+        if (shouldNavigate) {
+          e.preventDefault();
+          const nextElement = findNextItem(item.id);
+          if (nextElement) {
+            const textNode = ensureTextNode(nextElement);
+            nextElement.focus();
+
+            // Position cursor at start
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, 0);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }
         }
       }
     }
