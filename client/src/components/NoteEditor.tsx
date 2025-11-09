@@ -52,6 +52,25 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
     setContentHistory(newContent);
   };
 
+  // Periodic sync for auto-save safety (every 3 seconds)
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      listEditorRef.current?.syncFocusedItem?.();
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  // Sync before page unload to prevent data loss
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      listEditorRef.current?.syncFocusedItem?.();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   // Handle keyboard shortcuts for undo/redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -59,6 +78,7 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
         if (canUndo) {
           e.preventDefault();
+          listEditorRef.current?.syncFocusedItem?.(); // Sync before undo
           undo();
         }
       }
@@ -66,6 +86,7 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
       else if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
         if (canRedo) {
           e.preventDefault();
+          listEditorRef.current?.syncFocusedItem?.(); // Sync before redo
           redo();
         }
       }
@@ -73,6 +94,7 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
       else if ((e.metaKey || e.ctrlKey) && e.key === 'y') {
         if (canRedo) {
           e.preventDefault();
+          listEditorRef.current?.syncFocusedItem?.(); // Sync before redo
           redo();
         }
       }
