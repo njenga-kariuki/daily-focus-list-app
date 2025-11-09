@@ -301,11 +301,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Focus the duplicated item
     const newElement = itemRefs.current.get(duplicatedItem.id);
     if (newElement) {
-      ensureTextNode(newElement);
+      const textNode = ensureTextNode(newElement);
       newElement.focus();
 
       // Place cursor at end
-      const textNode = newElement.firstChild as Text;
       const range = document.createRange();
       const sel = window.getSelection();
       range.setStart(textNode, textNode.length);
@@ -506,11 +505,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       // Now DOM is updated, safe to manipulate
       const newElement = itemRefs.current.get(newItem.id);
       if (newElement) {
-        ensureTextNode(newElement);
+        const textNode = ensureTextNode(newElement);
         newElement.focus();
 
         // Simple cursor positioning at start
-        const textNode = newElement.firstChild as Text;
         const range = document.createRange();
         const sel = window.getSelection();
         range.setStart(textNode, 0);
@@ -622,11 +620,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       if (nextFocusId) {
         const nextElement = itemRefs.current.get(nextFocusId);
         if (nextElement) {
-          ensureTextNode(nextElement);
+          const textNode = ensureTextNode(nextElement);
           nextElement.focus();
 
           // Position cursor at start
-          const textNode = nextElement.firstChild as Text;
           const range = document.createRange();
           const sel = window.getSelection();
           range.setStart(textNode, 0);
@@ -678,11 +675,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
           // Focus previous item at the end of its text
           if (previousElement) {
-            ensureTextNode(previousElement);
+            const textNode = ensureTextNode(previousElement);
             previousElement.focus();
 
             // Position cursor at end
-            const textNode = previousElement.firstChild as Text;
             const range = document.createRange();
             const sel = window.getSelection();
             range.setStart(textNode, textNode.length);
@@ -750,11 +746,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
         const previousDomElement = itemRefs.current.get(previousId);
         if (previousDomElement) {
-          ensureTextNode(previousDomElement);
+          const textNode = ensureTextNode(previousDomElement);
           previousDomElement.focus();
 
           // Position cursor at merge point
-          const textNode = previousDomElement.firstChild as Text;
           const range = document.createRange();
           const sel = window.getSelection();
           range.setStart(textNode, previousTextLength);
@@ -848,11 +843,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
         const currentDomElement = itemRefs.current.get(item.id);
         if (currentDomElement) {
-          ensureTextNode(currentDomElement);
+          const textNode = ensureTextNode(currentDomElement);
           currentDomElement.focus();
 
           // Position cursor at merge point
-          const textNode = currentDomElement.firstChild as Text;
           const range = document.createRange();
           const sel = window.getSelection();
           range.setStart(textNode, currentTextLength);
@@ -869,11 +863,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         e.preventDefault();
         const previousElement = findPreviousItem(item.id);
         if (previousElement) {
-          ensureTextNode(previousElement);
+          const textNode = ensureTextNode(previousElement);
           previousElement.focus();
 
           // Position cursor at end
-          const textNode = previousElement.firstChild as Text;
           const range = document.createRange();
           const sel = window.getSelection();
           range.setStart(textNode, textNode.length);
@@ -890,11 +883,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         e.preventDefault();
         const nextElement = findNextItem(item.id);
         if (nextElement) {
-          ensureTextNode(nextElement);
+          const textNode = ensureTextNode(nextElement);
           nextElement.focus();
 
           // Position cursor at start
-          const textNode = nextElement.firstChild as Text;
           const range = document.createRange();
           const sel = window.getSelection();
           range.setStart(textNode, 0);
@@ -919,11 +911,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           e.preventDefault();
           const previousElement = findPreviousItem(item.id);
           if (previousElement) {
-            ensureTextNode(previousElement);
+            const textNode = ensureTextNode(previousElement);
             previousElement.focus();
 
             // Position cursor at end
-            const textNode = previousElement.firstChild as Text;
             const range = document.createRange();
             const sel = window.getSelection();
             range.setStart(textNode, textNode.length);
@@ -950,11 +941,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           e.preventDefault();
           const nextElement = findNextItem(item.id);
           if (nextElement) {
-            ensureTextNode(nextElement);
+            const textNode = ensureTextNode(nextElement);
             nextElement.focus();
 
             // Position cursor at start
-            const textNode = nextElement.firstChild as Text;
             const range = document.createRange();
             const sel = window.getSelection();
             range.setStart(textNode, 0);
@@ -1095,11 +1085,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         const lastId = visualOrder[visualOrder.length - 1];
         const lastItem = itemRefs.current.get(lastId);
         if (lastItem) {
-          ensureTextNode(lastItem);
+          const textNode = ensureTextNode(lastItem);
           lastItem.focus();
 
           // Position cursor at end
-          const textNode = lastItem.firstChild as Text;
           const range = document.createRange();
           const sel = window.getSelection();
           range.setStart(textNode, textNode.length);
@@ -1115,11 +1104,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         const firstId = visualOrder[0];
         const firstItem = itemRefs.current.get(firstId);
         if (firstItem) {
-          ensureTextNode(firstItem);
+          const textNode = ensureTextNode(firstItem);
           firstItem.focus();
 
           // Position cursor at end
-          const textNode = firstItem.firstChild as Text;
           const range = document.createRange();
           const sel = window.getSelection();
           range.setStart(textNode, textNode.length);
@@ -1143,11 +1131,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       // Focus the new item
       const newElement = itemRefs.current.get(newItem.id);
       if (newElement) {
-        ensureTextNode(newElement);
+        const textNode = ensureTextNode(newElement);
         newElement.focus();
 
         // Position cursor at start
-        const textNode = newElement.firstChild as Text;
         const range = document.createRange();
         const sel = window.getSelection();
         range.setStart(textNode, 0);
@@ -1211,11 +1198,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Focus the new item
     const newElement = itemRefs.current.get(newItem.id);
     if (newElement) {
-      ensureTextNode(newElement);
+      const textNode = ensureTextNode(newElement);
       newElement.focus();
 
       // Position cursor at start
-      const textNode = newElement.firstChild as Text;
       const range = document.createRange();
       const sel = window.getSelection();
       range.setStart(textNode, 0);
@@ -1309,11 +1295,10 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
             // Focus the new item
             const newElement = itemRefs.current.get(newItem.id);
             if (newElement) {
-              ensureTextNode(newElement);
+              const textNode = ensureTextNode(newElement);
               newElement.focus();
 
               // Position cursor at start
-              const textNode = newElement.firstChild as Text;
               const range = document.createRange();
               const sel = window.getSelection();
               range.setStart(textNode, 0);
