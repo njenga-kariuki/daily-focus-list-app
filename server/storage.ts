@@ -187,7 +187,18 @@ async function createStorage(): Promise<IStorage> {
       const { DbStorage } = await import("./dbStorage.js");
       console.log("Using DbStorage with database persistence");
       return new DbStorage();
-    } catch (error) {
+    } catch (error: any) {
+      // Check if the error is due to missing tables
+      if (error?.code === '42P01' || error?.message?.includes('does not exist')) {
+        console.error("\n❌ Database Error: Tables not found!");
+        console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.error("It looks like your database tables haven't been created yet.");
+        console.error("\nTo fix this, run:");
+        console.error("  npm run db:push");
+        console.error("\nThen restart the application.");
+        console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        process.exit(1);
+      }
       console.error("Failed to initialize DbStorage, falling back to MemStorage:", error);
       return new MemStorage();
     }
