@@ -547,11 +547,26 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
       console.log('[Enter] After flushSync, DOM should be updated');
 
-      // Now DOM is updated, safe to manipulate
-      const newElement = itemRefs.current.get(newItem.id);
-      console.log('[Enter] Got new element from refs:', {
+      // DOM is updated, but ref callback might not have run yet
+      // Query DOM directly using data-testid
+      let newElement = itemRefs.current.get(newItem.id);
+
+      if (!newElement) {
+        console.log('[Enter] Element not in refs yet, querying DOM directly...');
+        const testId = `input-list-item-${newItem.id}`;
+        newElement = document.querySelector(`[data-testid="${testId}"]`) as HTMLDivElement | null;
+
+        // Populate the ref manually for future use
+        if (newElement) {
+          console.log('[Enter] Found element in DOM, adding to refs manually');
+          itemRefs.current.set(newItem.id, newElement);
+        }
+      }
+
+      console.log('[Enter] Got new element:', {
         found: !!newElement,
-        elementId: newElement?.getAttribute('data-testid')
+        elementId: newElement?.getAttribute('data-testid'),
+        method: itemRefs.current.has(newItem.id) ? 'from refs' : 'from DOM query'
       });
 
       if (newElement) {
@@ -581,7 +596,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           cursorOffset: window.getSelection()?.getRangeAt(0)?.startOffset
         });
       } else {
-        console.error('[Enter] ERROR: Could not find new element in refs!');
+        console.error('[Enter] ERROR: Could not find new element even after DOM query!');
       }
     }
 
