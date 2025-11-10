@@ -20,7 +20,7 @@ export interface IStorage {
 const DEFAULT_TEMPLATE: ListItem[] = [
   {
     id: "template-1",
-    text: "Preworkout",
+    text: "pre-workout",
     level: 0,
     children: [
       { id: "template-1-1", text: "Check in with family", level: 1 },
@@ -30,21 +30,26 @@ const DEFAULT_TEMPLATE: ListItem[] = [
   },
   {
     id: "template-2",
-    text: "Workout Post Workout",
+    text: "workout",
     level: 0,
   },
   {
     id: "template-3",
-    text: "Schedule",
+    text: "post-workout",
     level: 0,
   },
   {
     id: "template-4",
-    text: "Priority To Do",
+    text: "Schedule",
     level: 0,
   },
   {
     id: "template-5",
+    text: "Priority To Do",
+    level: 0,
+  },
+  {
+    id: "template-6",
     text: "Secondary",
     level: 0,
   },
@@ -175,4 +180,29 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// Use DbStorage if DATABASE_URL is configured, otherwise fall back to MemStorage
+async function createStorage(): Promise<IStorage> {
+  if (process.env.DATABASE_URL) {
+    try {
+      const { DbStorage } = await import("./dbStorage.js");
+      console.log("Using DbStorage with database persistence");
+      return new DbStorage();
+    } catch (error) {
+      console.error("Failed to initialize DbStorage, falling back to MemStorage:", error);
+      return new MemStorage();
+    }
+  }
+  console.log("Using MemStorage (in-memory, no persistence)");
+  return new MemStorage();
+}
+
+export const storagePromise = createStorage();
+export let storage: IStorage;
+
+// Initialize storage
+storagePromise.then(s => {
+  storage = s;
+}).catch(error => {
+  console.error("Failed to create storage:", error);
+  storage = new MemStorage();
+});

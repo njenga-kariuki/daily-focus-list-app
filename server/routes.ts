@@ -1,12 +1,13 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storagePromise } from "./storage";
 import { format, addDays, parseISO } from "date-fns";
 import type { CalendarEvent } from "@shared/schema";
 import { getCalendarEvents } from "./calendarService";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Initialize storage with default template and notes
+  // Wait for storage to be created and then initialize it
+  const storage = await storagePromise;
   await storage.initialize();
 
   // Get template
