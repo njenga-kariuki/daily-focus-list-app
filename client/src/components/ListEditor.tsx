@@ -540,70 +540,75 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
       console.log('[Enter] Created new item:', newItem.id);
 
-      // Use flushSync for immediate DOM update
-      flushSync(() => {
-        updateAndAddAfter(item.id, { text: textBeforeCursor }, newItem);
+      // Update state - this triggers parent (NoteEditor) to re-render
+      // Can't use flushSync because items is a prop from parent
+      // Must wait for: ListEditor -> NoteEditor (state update) -> ListEditor (re-render with new items)
+      updateAndAddAfter(item.id, { text: textBeforeCursor }, newItem);
+
+      console.log('[Enter] Called updateAndAddAfter, waiting for re-render...');
+
+      // Use double RAF to ensure DOM has updated after parent re-renders
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          console.log('[Enter] After double RAF');
+
+          // Check what's actually in the DOM now
+          const allListItems = Array.from(document.querySelectorAll('[data-testid^="input-list-item-"]'));
+          console.log('[Enter] All list items in DOM now:', allListItems.map(el => el.getAttribute('data-testid')));
+
+          // Try refs first, then DOM query
+          let newElement = itemRefs.current.get(newItem.id);
+
+          if (!newElement) {
+            console.log('[Enter] Element not in refs yet, querying DOM directly...');
+            const testId = `input-list-item-${newItem.id}`;
+            console.log('[Enter] Looking for:', testId);
+            newElement = document.querySelector(`[data-testid="${testId}"]`) as HTMLDivElement | null;
+
+            // Populate the ref manually for future use
+            if (newElement) {
+              console.log('[Enter] Found element in DOM, adding to refs manually');
+              itemRefs.current.set(newItem.id, newElement);
+            }
+          }
+
+          console.log('[Enter] Got new element:', {
+            found: !!newElement,
+            elementId: newElement?.getAttribute('data-testid'),
+            method: itemRefs.current.has(newItem.id) ? 'from refs' : 'from DOM query'
+          });
+
+          if (newElement) {
+            const textNode = ensureTextNode(newElement);
+            console.log('[Enter] Ensured text node:', {
+              textNodeLength: textNode.length,
+              textNodeValue: textNode.textContent
+            });
+
+            newElement.focus();
+            console.log('[Enter] Called focus(), activeElement is:', {
+              activeElementTestId: document.activeElement?.getAttribute('data-testid'),
+              isSameElement: document.activeElement === newElement
+            });
+
+            // Simple cursor positioning at start
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, 0);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+
+            console.log('[Enter] Set cursor position, final check:', {
+              activeElement: document.activeElement?.getAttribute('data-testid'),
+              selectionRangeCount: window.getSelection()?.rangeCount,
+              cursorOffset: window.getSelection()?.getRangeAt(0)?.startOffset
+            });
+          } else {
+            console.error('[Enter] ERROR: Could not find new element even after RAF!');
+          }
+        });
       });
-
-      console.log('[Enter] After flushSync, DOM should be updated');
-
-      // Check what's actually in the DOM
-      const allListItems = Array.from(document.querySelectorAll('[data-testid^="input-list-item-"]'));
-      console.log('[Enter] All list items in DOM:', allListItems.map(el => el.getAttribute('data-testid')));
-      console.log('[Enter] Items in React state:', items.map(i => i.id));
-
-      // DOM is updated, but ref callback might not have run yet
-      // Query DOM directly using data-testid
-      let newElement = itemRefs.current.get(newItem.id);
-
-      if (!newElement) {
-        console.log('[Enter] Element not in refs yet, querying DOM directly...');
-        const testId = `input-list-item-${newItem.id}`;
-        console.log('[Enter] Looking for:', testId);
-        newElement = document.querySelector(`[data-testid="${testId}"]`) as HTMLDivElement | null;
-
-        // Populate the ref manually for future use
-        if (newElement) {
-          console.log('[Enter] Found element in DOM, adding to refs manually');
-          itemRefs.current.set(newItem.id, newElement);
-        }
-      }
-
-      console.log('[Enter] Got new element:', {
-        found: !!newElement,
-        elementId: newElement?.getAttribute('data-testid'),
-        method: itemRefs.current.has(newItem.id) ? 'from refs' : 'from DOM query'
-      });
-
-      if (newElement) {
-        const textNode = ensureTextNode(newElement);
-        console.log('[Enter] Ensured text node:', {
-          textNodeLength: textNode.length,
-          textNodeValue: textNode.textContent
-        });
-
-        newElement.focus();
-        console.log('[Enter] Called focus(), activeElement is:', {
-          activeElementTestId: document.activeElement?.getAttribute('data-testid'),
-          isSameElement: document.activeElement === newElement
-        });
-
-        // Simple cursor positioning at start
-        const range = document.createRange();
-        const sel = window.getSelection();
-        range.setStart(textNode, 0);
-        range.collapse(true);
-        sel?.removeAllRanges();
-        sel?.addRange(range);
-
-        console.log('[Enter] Set cursor position, final check:', {
-          activeElement: document.activeElement?.getAttribute('data-testid'),
-          selectionRangeCount: window.getSelection()?.rangeCount,
-          cursorOffset: window.getSelection()?.getRangeAt(0)?.startOffset
-        });
-      } else {
-        console.error('[Enter] ERROR: Could not find new element even after DOM query!');
-      }
     }
 
     // Tab: Indent (increase level)
