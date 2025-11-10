@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, memo, useImperativeHandle, forwardRef, type KeyboardEvent, type FormEvent, type MouseEvent } from "react";
+import { flushSync } from "react-dom";
 import type { ListItem } from "@shared/schema";
 
 interface ListEditorProps {
@@ -11,6 +12,7 @@ export interface ListEditorRef {
   focusLastItem: () => void;
   focusFirstItem: () => void;
   createAndFocusNewItem: () => void;
+  syncFocusedItem: () => void;
 }
 
 export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, onChange, className = "" }, ref) => {
@@ -292,18 +294,24 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       children: item.children ? cloneItems(item.children) : undefined,
     };
 
-    addItemAfter(id, duplicatedItem);
+    flushSync(() => {
+      addItemAfter(id, duplicatedItem);
+    });
 
     // Focus the duplicated item
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newElement = itemRefs.current.get(duplicatedItem.id);
-        if (newElement) {
-          newElement.focus();
-          setCursorPosition(newElement, 0, true); // Place cursor at end
-        }
-      });
-    });
+    const newElement = itemRefs.current.get(duplicatedItem.id);
+    if (newElement) {
+      const textNode = ensureTextNode(newElement);
+      newElement.focus();
+
+      // Place cursor at end
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.setStart(textNode, textNode.length);
+      range.collapse(true);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
   };
 
   type SavedCaretPosition = {
@@ -421,6 +429,64 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     };
   };
 
+  // Helper to check if cursor is on the first visual line
+  const isOnFirstLine = (element: HTMLDivElement): boolean => {
+    // Simple approach: if there are no <br> tags, we're always on first line
+    // If there are <br> tags, check if cursor is before the first one
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return true;
+
+    const textContent = element.textContent || '';
+    const brTags = element.querySelectorAll('br');
+
+    // No line breaks = single line = always on first line
+    if (brTags.length === 0) {
+      console.log('[isOnFirstLine] Single line item - always true');
+      return true;
+    }
+
+    // Multi-line item: check cursor position relative to first <br>
+    const range = sel.getRangeAt(0);
+    const preCaretRange = range.cloneRange();
+    preCaretRange.selectNodeContents(element);
+    preCaretRange.setEnd(range.startContainer, range.startOffset);
+    const textBeforeCursor = preCaretRange.toString();
+
+    // If there's a newline before cursor, we're NOT on first line
+    const result = !textBeforeCursor.includes('\n');
+    console.log('[isOnFirstLine]', { brCount: brTags.length, textBeforeCursor, result });
+    return result;
+  };
+
+  // Helper to check if cursor is on the last visual line
+  const isOnLastLine = (element: HTMLDivElement): boolean => {
+    // Simple approach: if there are no <br> tags, we're always on last line
+    // If there are <br> tags, check if cursor is after the last one
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return true;
+
+    const textContent = element.textContent || '';
+    const brTags = element.querySelectorAll('br');
+
+    // No line breaks = single line = always on last line
+    if (brTags.length === 0) {
+      console.log('[isOnLastLine] Single line item - always true');
+      return true;
+    }
+
+    // Multi-line item: check if there's any text after cursor that contains newline
+    const range = sel.getRangeAt(0);
+    const afterCaretRange = range.cloneRange();
+    afterCaretRange.selectNodeContents(element);
+    afterCaretRange.setStart(range.endContainer, range.endOffset);
+    const textAfterCursor = afterCaretRange.toString();
+
+    // If there's a newline after cursor, we're NOT on last line
+    const result = !textAfterCursor.includes('\n');
+    console.log('[isOnLastLine]', { brCount: brTags.length, textAfterCursor, result });
+    return result;
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>, item: ListItem) => {
     const target = e.target as HTMLDivElement;
     
@@ -433,6 +499,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Enter: Create new item (split text if in middle)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      console.log('[Enter] Key pressed');
 
       // Get cursor position and split text
       const selection = window.getSelection();
@@ -444,10 +511,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
         // If text is selected, delete the selection first
         if (!selection.isCollapsed) {
-          // Delete selected text by replacing with empty string
           range.deleteContents();
-          // Update the item text
-          updateItem(item.id, { text: target.textContent || '' });
         }
 
         // Get text before cursor
@@ -465,6 +529,8 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         textBeforeCursor = target.textContent || '';
       }
 
+      console.log('[Enter] Split text:', { textBeforeCursor, textAfterCursor });
+
       // Create new item with text after cursor
       const newItem: ListItem = {
         id: `item-${Date.now()}`,
@@ -472,16 +538,74 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         level: item.level,
       };
 
-      // Batched update: update current item and add new item in one go
+      console.log('[Enter] Created new item:', newItem.id);
+
+      // Update state - this triggers parent (NoteEditor) to re-render
+      // Can't use flushSync because items is a prop from parent
+      // Must wait for: ListEditor -> NoteEditor (state update) -> ListEditor (re-render with new items)
       updateAndAddAfter(item.id, { text: textBeforeCursor }, newItem);
 
-      // Focus new item after React re-renders - double RAF ensures DOM is updated
+      console.log('[Enter] Called updateAndAddAfter, waiting for re-render...');
+
+      // Use double RAF to ensure DOM has updated after parent re-renders
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          const newElement = itemRefs.current.get(newItem.id);
+          console.log('[Enter] After double RAF');
+
+          // Check what's actually in the DOM now
+          const allListItems = Array.from(document.querySelectorAll('[data-testid^="input-list-item-"]'));
+          console.log('[Enter] All list items in DOM now:', allListItems.map(el => el.getAttribute('data-testid')));
+
+          // Try refs first, then DOM query
+          let newElement = itemRefs.current.get(newItem.id);
+
+          if (!newElement) {
+            console.log('[Enter] Element not in refs yet, querying DOM directly...');
+            const testId = `input-list-item-${newItem.id}`;
+            console.log('[Enter] Looking for:', testId);
+            newElement = document.querySelector(`[data-testid="${testId}"]`) as HTMLDivElement | null;
+
+            // Populate the ref manually for future use
+            if (newElement) {
+              console.log('[Enter] Found element in DOM, adding to refs manually');
+              itemRefs.current.set(newItem.id, newElement);
+            }
+          }
+
+          console.log('[Enter] Got new element:', {
+            found: !!newElement,
+            elementId: newElement?.getAttribute('data-testid'),
+            method: itemRefs.current.has(newItem.id) ? 'from refs' : 'from DOM query'
+          });
+
           if (newElement) {
+            const textNode = ensureTextNode(newElement);
+            console.log('[Enter] Ensured text node:', {
+              textNodeLength: textNode.length,
+              textNodeValue: textNode.textContent
+            });
+
             newElement.focus();
-            setCursorPosition(newElement, 0, false);
+            console.log('[Enter] Called focus(), activeElement is:', {
+              activeElementTestId: document.activeElement?.getAttribute('data-testid'),
+              isSameElement: document.activeElement === newElement
+            });
+
+            // Simple cursor positioning at start
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, 0);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+
+            console.log('[Enter] Set cursor position, final check:', {
+              activeElement: document.activeElement?.getAttribute('data-testid'),
+              selectionRangeCount: window.getSelection()?.rangeCount,
+              cursorOffset: window.getSelection()?.getRangeAt(0)?.startOffset
+            });
+          } else {
+            console.error('[Enter] ERROR: Could not find new element even after RAF!');
           }
         });
       });
@@ -491,19 +615,12 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
       if (item.level < 5) {
-        // Save cursor position before state update
-        const savedCaret = captureCaretPosition(target);
-
-        updateItem(item.id, { level: item.level + 1 });
-
-        // Restore cursor position after re-render
-        requestAnimationFrame(() => {
-          const element = itemRefs.current.get(item.id);
-          if (element) {
-            element.focus();
-            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
-          }
+        flushSync(() => {
+          updateItem(item.id, { level: item.level + 1 });
         });
+        // ContentEditable maintains cursor position for non-text changes
+        const element = itemRefs.current.get(item.id);
+        element?.focus();
       }
     }
 
@@ -511,19 +628,12 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       if (item.level > 0) {
-        // Save cursor position before state update
-        const savedCaret = captureCaretPosition(target);
-
-        updateItem(item.id, { level: item.level - 1 });
-
-        // Restore cursor position after re-render
-        requestAnimationFrame(() => {
-          const element = itemRefs.current.get(item.id);
-          if (element) {
-            element.focus();
-            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
-          }
+        flushSync(() => {
+          updateItem(item.id, { level: item.level - 1 });
         });
+        // ContentEditable maintains cursor position for non-text changes
+        const element = itemRefs.current.get(item.id);
+        element?.focus();
       }
     }
 
@@ -531,15 +641,11 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if ((e.metaKey || e.ctrlKey) && e.key === ']') {
       e.preventDefault();
       if (item.level < 5) {
-        const savedCaret = captureCaretPosition(target);
-        updateItem(item.id, { level: item.level + 1 });
-        requestAnimationFrame(() => {
-          const element = itemRefs.current.get(item.id);
-          if (element) {
-            element.focus();
-            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
-          }
+        flushSync(() => {
+          updateItem(item.id, { level: item.level + 1 });
         });
+        const element = itemRefs.current.get(item.id);
+        element?.focus();
       }
     }
 
@@ -547,44 +653,28 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     if ((e.metaKey || e.ctrlKey) && e.key === '[') {
       e.preventDefault();
       if (item.level > 0) {
-        const savedCaret = captureCaretPosition(target);
-        updateItem(item.id, { level: item.level - 1 });
-        requestAnimationFrame(() => {
-          const element = itemRefs.current.get(item.id);
-          if (element) {
-            element.focus();
-            setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
-          }
+        flushSync(() => {
+          updateItem(item.id, { level: item.level - 1 });
         });
+        const element = itemRefs.current.get(item.id);
+        element?.focus();
       }
     }
 
     // Cmd+Shift+Up or Ctrl+Shift+Up: Move item up
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'ArrowUp') {
       e.preventDefault();
-      const savedCaret = captureCaretPosition(target);
       moveItemUp(item.id);
-      requestAnimationFrame(() => {
-        const element = itemRefs.current.get(item.id);
-        if (element) {
-          element.focus();
-          setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
-        }
-      });
+      const element = itemRefs.current.get(item.id);
+      element?.focus();
     }
 
     // Cmd+Shift+Down or Ctrl+Shift+Down: Move item down
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'ArrowDown') {
       e.preventDefault();
-      const savedCaret = captureCaretPosition(target);
       moveItemDown(item.id);
-      requestAnimationFrame(() => {
-        const element = itemRefs.current.get(item.id);
-        if (element) {
-          element.focus();
-          setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
-        }
-      });
+      const element = itemRefs.current.get(item.id);
+      element?.focus();
     }
 
     // Cmd+D or Ctrl+D: Duplicate item
@@ -615,19 +705,25 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         nextFocusId = visualOrder[currentIndex - 1];
       }
 
-      deleteItem(item.id);
+      flushSync(() => {
+        deleteItem(item.id);
+      });
 
       // Focus the next item after deletion
       if (nextFocusId) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            const nextElement = itemRefs.current.get(nextFocusId);
-            if (nextElement) {
-              nextElement.focus();
-              setCursorPosition(nextElement, 0, false);
-            }
-          });
-        });
+        const nextElement = itemRefs.current.get(nextFocusId);
+        if (nextElement) {
+          const textNode = ensureTextNode(nextElement);
+          nextElement.focus();
+
+          // Position cursor at start
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.setStart(textNode, 0);
+          range.collapse(true);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
       }
     }
 
@@ -657,20 +753,31 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         e.preventDefault();
         // If item is indented, outdent first
         if (item.level > 0) {
-          updateItem(item.id, { level: item.level - 1 });
+          flushSync(() => {
+            updateItem(item.id, { level: item.level - 1 });
+          });
+          const element = itemRefs.current.get(item.id);
+          element?.focus();
         } else {
           // If at level 0, delete the item and focus previous
           const previousElement = findPreviousItem(item.id);
 
-          // Delete current item
-          deleteItem(item.id);
+          flushSync(() => {
+            deleteItem(item.id);
+          });
 
           // Focus previous item at the end of its text
           if (previousElement) {
-            requestAnimationFrame(() => {
-              previousElement.focus();
-              setCursorPosition(previousElement, 0, true);
-            });
+            const textNode = ensureTextNode(previousElement);
+            previousElement.focus();
+
+            // Position cursor at end
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, textNode.length);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
           }
         }
       } else if (cursorAtStart) {
@@ -726,15 +833,23 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           previousItemClone.children.push(...currentItemChildren);
         }
 
-        onChange(itemsCopy);
-
-        requestAnimationFrame(() => {
-          const previousDomElement = itemRefs.current.get(previousId);
-          if (previousDomElement) {
-            previousDomElement.focus();
-            setCursorPosition(previousDomElement, previousTextLength, false);
-          }
+        flushSync(() => {
+          onChange(itemsCopy);
         });
+
+        const previousDomElement = itemRefs.current.get(previousId);
+        if (previousDomElement) {
+          const textNode = ensureTextNode(previousDomElement);
+          previousDomElement.focus();
+
+          // Position cursor at merge point
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.setStart(textNode, previousTextLength);
+          range.collapse(true);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
       }
     }
 
@@ -815,52 +930,83 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
           currentItemClone.children.push(...nextItemChildren);
         }
 
-        onChange(itemsCopy);
-
-        requestAnimationFrame(() => {
-          const currentDomElement = itemRefs.current.get(item.id);
-          if (currentDomElement) {
-            currentDomElement.focus();
-            setCursorPosition(currentDomElement, currentTextLength, false);
-          }
+        flushSync(() => {
+          onChange(itemsCopy);
         });
+
+        const currentDomElement = itemRefs.current.get(item.id);
+        if (currentDomElement) {
+          const textNode = ensureTextNode(currentDomElement);
+          currentDomElement.focus();
+
+          // Position cursor at merge point
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.setStart(textNode, currentTextLength);
+          range.collapse(true);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
       }
     }
 
-    // Arrow Up: Navigate to previous item when at start of line
-    if (e.key === 'ArrowUp') {
+    // Arrow Up: Navigate to previous item when cursor can't move up further
+    if (e.key === 'ArrowUp' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
-        const cursorAtStart = range.startOffset === 0 && 
-          range.startContainer === target.firstChild;
-        
-        if (cursorAtStart || !target.firstChild) {
+        const cursorPosition = range.startOffset;
+
+        // Save the current cursor position
+        const beforeRange = range.cloneRange();
+        beforeRange.selectNodeContents(target);
+        beforeRange.setEnd(range.startContainer, range.startOffset);
+        const textOffsetBefore = beforeRange.toString().length;
+
+        // Check if we're on the first line by testing if default behavior would change cursor position vertically
+        // For single-line items or when on first line, we should navigate
+        const shouldNavigate = isOnFirstLine(target);
+
+        if (shouldNavigate) {
           e.preventDefault();
           const previousElement = findPreviousItem(item.id);
           if (previousElement) {
+            const textNode = ensureTextNode(previousElement);
             previousElement.focus();
-            setCursorPosition(previousElement, 0, true);
+
+            // Position cursor at end
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, textNode.length);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
           }
         }
       }
     }
 
-    // Arrow Down: Navigate to next item when at end of line
-    if (e.key === 'ArrowDown') {
+    // Arrow Down: Navigate to next item when cursor can't move down further
+    if (e.key === 'ArrowDown' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        const textLength = target.textContent?.length || 0;
-        const cursorAtEnd = range.startOffset === textLength &&
-          range.startContainer === target.lastChild;
+        // Check if we're on the last line
+        const shouldNavigate = isOnLastLine(target);
 
-        if (cursorAtEnd || !target.lastChild) {
+        if (shouldNavigate) {
           e.preventDefault();
           const nextElement = findNextItem(item.id);
           if (nextElement) {
+            const textNode = ensureTextNode(nextElement);
             nextElement.focus();
-            setCursorPosition(nextElement, 0, false);
+
+            // Position cursor at start
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, 0);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
           }
         }
       }
@@ -869,17 +1015,27 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Arrow Left: Navigate to previous item when at start
     if (e.key === 'ArrowLeft') {
       const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
+      if (selection && selection.rangeCount > 0 && selection.isCollapsed) {
         const range = selection.getRangeAt(0);
-        const cursorAtStart = range.startOffset === 0 &&
-          range.startContainer === target.firstChild;
+        const preCaretRange = range.cloneRange();
+        preCaretRange.selectNodeContents(target);
+        preCaretRange.setEnd(range.startContainer, range.startOffset);
+        const cursorOffset = preCaretRange.toString().length;
 
-        if ((cursorAtStart || !target.firstChild) && selection.isCollapsed) {
+        if (cursorOffset === 0) {
           e.preventDefault();
           const previousElement = findPreviousItem(item.id);
           if (previousElement) {
+            const textNode = ensureTextNode(previousElement);
             previousElement.focus();
-            setCursorPosition(previousElement, 0, true);
+
+            // Position cursor at end
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, textNode.length);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
           }
         }
       }
@@ -888,18 +1044,28 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Arrow Right: Navigate to next item when at end
     if (e.key === 'ArrowRight') {
       const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
+      if (selection && selection.rangeCount > 0 && selection.isCollapsed) {
         const range = selection.getRangeAt(0);
+        const preCaretRange = range.cloneRange();
+        preCaretRange.selectNodeContents(target);
+        preCaretRange.setEnd(range.startContainer, range.startOffset);
+        const cursorOffset = preCaretRange.toString().length;
         const textLength = target.textContent?.length || 0;
-        const cursorAtEnd = range.startOffset === textLength &&
-          range.startContainer === target.lastChild;
 
-        if ((cursorAtEnd || textLength === 0) && selection.isCollapsed) {
+        if (cursorOffset >= textLength) {
           e.preventDefault();
           const nextElement = findNextItem(item.id);
           if (nextElement) {
+            const textNode = ensureTextNode(nextElement);
             nextElement.focus();
-            setCursorPosition(nextElement, 0, false);
+
+            // Position cursor at start
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.setStart(textNode, 0);
+            range.collapse(true);
+            sel?.removeAllRanges();
+            sel?.addRange(range);
           }
         }
       }
@@ -981,53 +1147,27 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     return null;
   };
 
-  const handleInput = (e: FormEvent<HTMLDivElement>, item: ListItem) => {
-    const target = e.target as HTMLDivElement;
-    const newText = target.textContent || '';
-
-    // Save cursor position before state update
-    const savedCaret = captureCaretPosition(target);
-
-    updateItem(item.id, { text: newText });
-
-    // Restore cursor position after React re-renders
-    requestAnimationFrame(() => {
-      const element = itemRefs.current.get(item.id);
-      if (element && element === document.activeElement) {
-        // Only restore if this element is still focused
-        setCursorPosition(element, savedCaret ?? 0, savedCaret?.isAtEnd ?? false);
-      }
-    });
-  };
-
-  // Handle blur - auto-delete empty items like Apple Notes
+  // Handle blur - sync contentEditable text to React state
   const handleBlur = (item: ListItem) => {
+    console.log('[Blur] Item blurred:', item.id);
     setFocusedId(null);
 
-    // Auto-delete empty items (Apple Notes behavior)
-    if (item.text === '' || item.text.trim() === '') {
-      // Exception 1: Don't delete if it's the only item in the list
-      if (items.length === 1) {
-        return;
+    // Sync contentEditable DOM text to React state
+    const element = itemRefs.current.get(item.id);
+    if (element) {
+      const currentText = element.textContent || '';
+      console.log('[Blur] Checking text sync:', {
+        itemId: item.id,
+        currentText,
+        itemText: item.text,
+        needsUpdate: currentText !== item.text
+      });
+      if (currentText !== item.text) {
+        console.log('[Blur] Calling updateItem - this will trigger re-render!');
+        updateItem(item.id, { text: currentText });
       }
-
-      // Exception 2: Don't delete if item has children (is a header/section)
-      if (item.children && item.children.length > 0) {
-        return;
-      }
-
-      // Delete the empty item after a brief delay to allow for navigation
-      // This prevents deletion when user is just moving between items
-      setTimeout(() => {
-        // Re-check that item is still empty (user might have typed in the meantime)
-        const allItems = Array.from(itemRefs.current.values());
-        const itemElement = itemRefs.current.get(item.id);
-
-        if (itemElement && (itemElement.textContent === '' || itemElement.textContent?.trim() === '')) {
-          deleteItem(item.id);
-        }
-      }, 100);
     }
+    // Do NOT auto-delete empty items
   };
 
   // Handle paste - only allow plain text, no rich formatting
@@ -1068,8 +1208,16 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         const lastId = visualOrder[visualOrder.length - 1];
         const lastItem = itemRefs.current.get(lastId);
         if (lastItem) {
+          const textNode = ensureTextNode(lastItem);
           lastItem.focus();
-          setCursorPosition(lastItem, 0, true);
+
+          // Position cursor at end
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.setStart(textNode, textNode.length);
+          range.collapse(true);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
         }
       }
     },
@@ -1079,8 +1227,16 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         const firstId = visualOrder[0];
         const firstItem = itemRefs.current.get(firstId);
         if (firstItem) {
+          const textNode = ensureTextNode(firstItem);
           firstItem.focus();
-          setCursorPosition(firstItem, 0, true);
+
+          // Position cursor at end
+          const range = document.createRange();
+          const sel = window.getSelection();
+          range.setStart(textNode, textNode.length);
+          range.collapse(true);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
         }
       }
     },
@@ -1091,63 +1247,91 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         level: 0,
       };
 
-      onChange([...items, newItem]);
-
-      // Focus the new item after React re-renders - double RAF ensures DOM is updated
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const newElement = itemRefs.current.get(newItem.id);
-          if (newElement) {
-            newElement.focus();
-            setCursorPosition(newElement, 0, false);
-          }
-        });
+      flushSync(() => {
+        onChange([...items, newItem]);
       });
-    }
-  }), [items, onChange, getVisualOrderItems]);
+
+      // Focus the new item
+      const newElement = itemRefs.current.get(newItem.id);
+      if (newElement) {
+        const textNode = ensureTextNode(newElement);
+        newElement.focus();
+
+        // Position cursor at start
+        const range = document.createRange();
+        const sel = window.getSelection();
+        range.setStart(textNode, 0);
+        range.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    },
+    syncFocusedItem: () => {
+      // Sync currently focused item's DOM text to React state
+      if (focusedId) {
+        const element = itemRefs.current.get(focusedId);
+        if (element) {
+          const currentText = element.textContent || '';
+          const path = findItemPath(items, focusedId);
+          if (path) {
+            const { item } = getItemAndParentByPath(items, path);
+            if (item && currentText !== item.text) {
+              updateItem(focusedId, { text: currentText });
+            }
+          }
+        }
+      }
+    },
+  }), [items, onChange, getVisualOrderItems, focusedId]);
 
   // Handle clicks on empty space to create new items
   const handleContainerClick = useCallback((e: MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
-    
+
     // Check if click was on an interactive or content element
-    const isInteractive = 
+    const isInteractive =
       target.contentEditable === 'true' ||
       target.closest('[contenteditable="true"]') ||
       target.tagName === 'INPUT' ||
       target.tagName === 'BUTTON' ||
       target.tagName === 'TEXTAREA';
-    
+
     // Check if click was on list content (bullets, text, etc.)
     const isListContent =
       target.tagName === 'SPAN' ||  // Bullets
       target.closest('[data-testid^="list-item-"]') ||  // List item containers
       target.closest('[data-testid^="bullet-"]');  // Bullet elements
-    
+
     // If clicked on interactive element or list content, don't create new item
     if (isInteractive || isListContent) {
       return;
     }
-    
+
     // Clicked on true white space - create new item at the end
     const newItem: ListItem = {
       id: `item-${Date.now()}`,
       text: '',
       level: 0,
     };
-    
-    onChange([...items, newItem]);
 
-    // Focus the new item after React re-renders - double RAF ensures DOM is updated
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newElement = itemRefs.current.get(newItem.id);
-        if (newElement) {
-          newElement.focus();
-          setCursorPosition(newElement, 0, false);
-        }
-      });
+    flushSync(() => {
+      onChange([...items, newItem]);
     });
+
+    // Focus the new item
+    const newElement = itemRefs.current.get(newItem.id);
+    if (newElement) {
+      const textNode = ensureTextNode(newElement);
+      newElement.focus();
+
+      // Position cursor at start
+      const range = document.createRange();
+      const sel = window.getSelection();
+      range.setStart(textNode, 0);
+      range.collapse(true);
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
   }, [items, onChange]);
 
   const renderItem = (item: ListItem, index: number) => {
@@ -1179,7 +1363,6 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
             }}
             contentEditable
             suppressContentEditableWarning
-            onInput={(e) => handleInput(e, item)}
             onKeyDown={(e) => handleKeyDown(e, item)}
             onPaste={(e) => handlePaste(e, item)}
             onFocus={() => setFocusedId(item.id)}
@@ -1227,17 +1410,25 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
               text: '',
               level: 0,
             };
-            onChange([newItem]);
-            // Focus the new item after React re-renders - double RAF ensures DOM is updated
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                const newElement = itemRefs.current.get(newItem.id);
-                if (newElement) {
-                  newElement.focus();
-                  setCursorPosition(newElement, 0, false);
-                }
-              });
+
+            flushSync(() => {
+              onChange([newItem]);
             });
+
+            // Focus the new item
+            const newElement = itemRefs.current.get(newItem.id);
+            if (newElement) {
+              const textNode = ensureTextNode(newElement);
+              newElement.focus();
+
+              // Position cursor at start
+              const range = document.createRange();
+              const sel = window.getSelection();
+              range.setStart(textNode, 0);
+              range.collapse(true);
+              sel?.removeAllRanges();
+              sel?.addRange(range);
+            }
           }}
           className="text-muted-foreground/60 cursor-text p-2 text-list-item"
         >
