@@ -499,6 +499,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     // Enter: Create new item (split text if in middle)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      console.log('[Enter] Key pressed');
 
       // Get cursor position and split text
       const selection = window.getSelection();
@@ -528,6 +529,8 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         textBeforeCursor = target.textContent || '';
       }
 
+      console.log('[Enter] Split text:', { textBeforeCursor, textAfterCursor });
+
       // Create new item with text after cursor
       const newItem: ListItem = {
         id: `item-${Date.now()}`,
@@ -535,16 +538,34 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         level: item.level,
       };
 
+      console.log('[Enter] Created new item:', newItem.id);
+
       // Use flushSync for immediate DOM update
       flushSync(() => {
         updateAndAddAfter(item.id, { text: textBeforeCursor }, newItem);
       });
 
+      console.log('[Enter] After flushSync, DOM should be updated');
+
       // Now DOM is updated, safe to manipulate
       const newElement = itemRefs.current.get(newItem.id);
+      console.log('[Enter] Got new element from refs:', {
+        found: !!newElement,
+        elementId: newElement?.getAttribute('data-testid')
+      });
+
       if (newElement) {
         const textNode = ensureTextNode(newElement);
+        console.log('[Enter] Ensured text node:', {
+          textNodeLength: textNode.length,
+          textNodeValue: textNode.textContent
+        });
+
         newElement.focus();
+        console.log('[Enter] Called focus(), activeElement is:', {
+          activeElementTestId: document.activeElement?.getAttribute('data-testid'),
+          isSameElement: document.activeElement === newElement
+        });
 
         // Simple cursor positioning at start
         const range = document.createRange();
@@ -553,6 +574,14 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
         range.collapse(true);
         sel?.removeAllRanges();
         sel?.addRange(range);
+
+        console.log('[Enter] Set cursor position, final check:', {
+          activeElement: document.activeElement?.getAttribute('data-testid'),
+          selectionRangeCount: window.getSelection()?.rangeCount,
+          cursorOffset: window.getSelection()?.getRangeAt(0)?.startOffset
+        });
+      } else {
+        console.error('[Enter] ERROR: Could not find new element in refs!');
       }
     }
 
@@ -1094,13 +1123,21 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
   // Handle blur - sync contentEditable text to React state
   const handleBlur = (item: ListItem) => {
+    console.log('[Blur] Item blurred:', item.id);
     setFocusedId(null);
 
     // Sync contentEditable DOM text to React state
     const element = itemRefs.current.get(item.id);
     if (element) {
       const currentText = element.textContent || '';
+      console.log('[Blur] Checking text sync:', {
+        itemId: item.id,
+        currentText,
+        itemText: item.text,
+        needsUpdate: currentText !== item.text
+      });
       if (currentText !== item.text) {
+        console.log('[Blur] Calling updateItem - this will trigger re-render!');
         updateItem(item.id, { text: currentText });
       }
     }
