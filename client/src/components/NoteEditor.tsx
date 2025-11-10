@@ -107,16 +107,16 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
   // Handle clicks in strategic empty space areas only
   const handleEmptySpaceClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    
-    if (note.content.length === 0) {
+
+    if (contentHistory.length === 0) {
       // Create first item
       const newItem: ListItem = {
         id: `item-${Date.now()}`,
         text: '',
         level: 0,
       };
-      onNoteChange({ content: [newItem] });
-      
+      setContentHistory([newItem]);
+
       // Focus it after render
       requestAnimationFrame(() => {
         listEditorRef.current?.focusLastItem();
@@ -166,7 +166,7 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
       <div>
         <ListEditor
           ref={listEditorRef}
-          items={note.content}
+          items={contentHistory}
           onChange={handleContentChange}
         />
       </div>
