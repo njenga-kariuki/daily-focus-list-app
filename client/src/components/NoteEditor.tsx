@@ -5,6 +5,7 @@ import type { DailyNote, ListItem } from "@shared/schema";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useHistory } from "@/hooks/useHistory";
+import { parseLocalDate } from "@/lib/dateUtils";
 
 interface NoteEditorProps {
   note: DailyNote;
@@ -138,7 +139,7 @@ export function NoteEditor({ note, onNoteChange }: NoteEditorProps) {
       <header className="mb-2">
         <div className="flex items-baseline gap-3 mb-2">
           <h1 className="text-header-day text-foreground">
-            {note.dayName} {format(new Date(note.date), 'M/d')}
+            {note.dayName} {format(parseLocalDate(note.date), 'M/d')}
           </h1>
         </div>
         
