@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { format, addDays, parseISO } from "date-fns";
 import type { CalendarEvent } from "@shared/schema";
+import { getCalendarEvents } from "./calendarService";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize storage with default template and notes
@@ -93,7 +94,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        const events = generateMockEvents(dateStr);
+        const events = await getCalendarEvents(dateStr);
         notesWithEvents.push({ note, events });
       }
 
@@ -127,8 +128,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Mock calendar events (would integrate with Google Calendar API)
-      const events: CalendarEvent[] = generateMockEvents(date);
+      // Fetch real calendar events from Google Calendar
+      const events: CalendarEvent[] = await getCalendarEvents(date);
 
       res.json({ note, events });
     } catch (error) {
@@ -151,47 +152,4 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
   return httpServer;
-}
-
-// Mock calendar events generator (placeholder for Google Calendar integration)
-function generateMockEvents(dateStr: string): CalendarEvent[] {
-  const date = parseISO(dateStr);
-  const today = new Date();
-  
-  // Only generate events for today and tomorrow as examples
-  if (format(date, 'yyyy-MM-dd') === format(today, 'yyyy-MM-dd')) {
-    return [
-      {
-        id: "event-1",
-        title: "Team Standup",
-        startTime: new Date(date.setHours(9, 0, 0)).toISOString(),
-        endTime: new Date(date.setHours(9, 30, 0)).toISOString(),
-        isAllDay: false,
-        source: "google",
-      },
-      {
-        id: "event-2",
-        title: "Project Review",
-        startTime: new Date(date.setHours(14, 0, 0)).toISOString(),
-        endTime: new Date(date.setHours(15, 0, 0)).toISOString(),
-        isAllDay: false,
-        source: "google",
-      },
-    ];
-  }
-
-  if (format(date, 'yyyy-MM-dd') === format(addDays(today, 1), 'yyyy-MM-dd')) {
-    return [
-      {
-        id: "event-3",
-        title: "Client Meeting",
-        startTime: new Date(date.setHours(10, 0, 0)).toISOString(),
-        endTime: new Date(date.setHours(11, 30, 0)).toISOString(),
-        isAllDay: false,
-        source: "google",
-      },
-    ];
-  }
-
-  return [];
 }
