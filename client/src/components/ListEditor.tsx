@@ -547,6 +547,11 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
 
       console.log('[Enter] After flushSync, DOM should be updated');
 
+      // Check what's actually in the DOM
+      const allListItems = Array.from(document.querySelectorAll('[data-testid^="input-list-item-"]'));
+      console.log('[Enter] All list items in DOM:', allListItems.map(el => el.getAttribute('data-testid')));
+      console.log('[Enter] Items in React state:', items.map(i => i.id));
+
       // DOM is updated, but ref callback might not have run yet
       // Query DOM directly using data-testid
       let newElement = itemRefs.current.get(newItem.id);
@@ -554,6 +559,7 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
       if (!newElement) {
         console.log('[Enter] Element not in refs yet, querying DOM directly...');
         const testId = `input-list-item-${newItem.id}`;
+        console.log('[Enter] Looking for:', testId);
         newElement = document.querySelector(`[data-testid="${testId}"]`) as HTMLDivElement | null;
 
         // Populate the ref manually for future use
