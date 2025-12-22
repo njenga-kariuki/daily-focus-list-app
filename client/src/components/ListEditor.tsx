@@ -662,19 +662,27 @@ export const ListEditor = forwardRef<ListEditorRef, ListEditorProps>(({ items, o
     }
 
     // Cmd+Shift+Up or Ctrl+Shift+Up: Move item up
+    // Only move item if no text is selected (allow native selection extension when text is selected)
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveItemUp(item.id);
-      const element = itemRefs.current.get(item.id);
-      element?.focus();
+      const selection = window.getSelection();
+      if (selection && selection.isCollapsed) {
+        e.preventDefault();
+        moveItemUp(item.id);
+        const element = itemRefs.current.get(item.id);
+        element?.focus();
+      }
     }
 
     // Cmd+Shift+Down or Ctrl+Shift+Down: Move item down
+    // Only move item if no text is selected (allow native selection extension when text is selected)
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveItemDown(item.id);
-      const element = itemRefs.current.get(item.id);
-      element?.focus();
+      const selection = window.getSelection();
+      if (selection && selection.isCollapsed) {
+        e.preventDefault();
+        moveItemDown(item.id);
+        const element = itemRefs.current.get(item.id);
+        element?.focus();
+      }
     }
 
     // Cmd+D or Ctrl+D: Duplicate item
