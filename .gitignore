@@ -4,3 +4,9 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Local configuration and private runtime data
+.env
+.env.*
+!.env.example
+*.log
